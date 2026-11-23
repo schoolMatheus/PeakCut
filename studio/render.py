@@ -23,6 +23,13 @@ HOOK = {"font": "Poppins ExtraBold", "size": 96, "ink": "14100E", "box": "FFFFFF
         "max_w": 900}
 FONT_FILES = {"Poppins ExtraBold": "Poppins-ExtraBold.ttf", "Anton": "Anton-Regular.ttf", "Archivo Black": "ArchivoBlack-Regular.ttf"}
 CAP_MAX_W = 960   # captions never run wider than this, whatever is said
+INTERACTIONS = {
+    "subscribe": ("Subscribe to the channel", "Inscreva-se no canal"),
+    "like": ("Like this video", "Deixe seu like"),
+    "comment": ("Leave a comment", "Deixe seu comentário"),
+    "share": ("Share this video", "Compartilhe este vídeo"),
+    "save": ("Save this video", "Salve este vídeo"),
+}
 
 
 class _Font:
@@ -163,7 +170,44 @@ def _hook_events(hook, dur, y):
     return ev
 
 
-def build_ass(words, start, end, hook, style_name, highlight, hook_y, cap_y) -> str:
+def _interaction_events(actions, dur, language, hook_y, cap_y):
+    """A small moving card, in its own band, with only one request visible at a time."""
+    actions = list(dict.fromkeys(action for action in (actions or []) if isinstance(action, str) and action in INTERACTIONS))
+    if not actions or dur <= 0.5:
+        return []
+    # The highest caption style can grow as it highlights a word. Leave room for that growth,
+    # the whole card, and its short entrance, including when captions sit low in the frame.
+    candidates = [cap_y + 220, cap_y - 240, H - 300, 700]
+    y = next((v for v in candidates if 160 <= v <= H - 260 and abs(v - cap_y) >= 220
+              and abs(v - hook_y) >= 260), None)
+    if y is None:
+        return []
+    f = _Font.get(HOOK["font"])
+    slot = (dur - 0.4) / len(actions)
+    hold = min(3.0, slot - min(0.15, slot * 0.15))
+    ev = []
+    for i, action in enumerate(actions):
+        text = INTERACTIONS[action][1 if language == "pt-BR" else 0]
+        size = min(64, 64 * (W - 240) / max(1, f.width(text, 64)))
+        width, height, radius = f.width(text, size) + 72, 104, 22
+        x, top = (W - width) / 2, y - height / 2
+        # Local drawing coordinates let the background and its text make the same movement.
+        box = (f"m {radius} 0 l {width-radius:.0f} 0 "
+               f"b {width:.0f} 0 {width:.0f} 0 {width:.0f} {radius} l {width:.0f} {height-radius} "
+               f"b {width:.0f} {height} {width:.0f} {height} {width-radius:.0f} {height} l {radius} {height} "
+               f"b 0 {height} 0 {height} 0 {height-radius} l 0 {radius} b 0 0 0 0 {radius} 0")
+        begin = 0.2 + i * slot + (slot - hold) / 2
+        span = f"{_ts(begin)},{_ts(begin + hold)}"
+        move_ms = min(240, int(hold * 250))
+        fade_ms = min(180, int(hold * 200))
+        motion = lambda px, py: (f"\\move({px:.0f},{py+24:.0f},{px:.0f},{py:.0f},0,{move_ms})"
+                                 f"\\fad({fade_ms},{fade_ms})")
+        ev.append(f"Dialogue: 5,{span},Interaction,,0,0,0,,{{\\an7{motion(x, top)}\\c&H338BFF&\\p1}}{box}{{\\p0}}")
+        ev.append(f"Dialogue: 6,{span},Interaction,,0,0,0,,{{\\an5{motion(W/2, y-f.cap_shift(size))}\\fs{size:.0f}}}{text}")
+    return ev
+
+
+def build_ass(words, start, end, hook, style_name, highlight, hook_y, cap_y, *, interactions=None, language="en") -> str:
     st = STYLES.get(style_name, STYLES["bounce"])
     words = [dict(w, s=w["s"] - CAPTION_LEAD, e=w["e"] - CAPTION_LEAD) for w in words]
     strong = {_key(h) for h in highlight if _key(h)}
@@ -178,12 +222,14 @@ ScaledBorderAndShadow: yes
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 Style: Cap,{st['font']},{st['size']},&H00{st['base']},&H00{st['base']},&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,{st['outline']},0,5,0,0,0,1
 Style: Hook,{HOOK['font']},{HOOK['size']},&H00{HOOK['ink']},&H00{HOOK['ink']},&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,0,0,5,0,0,0,1
+Style: Interaction,{HOOK['font']},64,&H0014100E,&H0014100E,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,0,0,5,0,0,0,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
     dur = end - start
     ev = _hook_events(_clean(hook), dur, hook_y)
+    ev.extend(_interaction_events(interactions, dur, language, hook_y, cap_y))
     f = _Font.get(st["font"])
     inside = [dict(w, w=_clean(w["w"])) for w in words if w["s"] >= start - 0.05 and w["s"] < end]
     inside = sorted((w for w in inside if w["w"]), key=lambda w: w["s"])
@@ -303,7 +349,8 @@ def render_clip(src: Path, out_dir: Path, name: str, clip: dict, words: list, sr
         layout = "crop"     # no webcam found: the game fills the screen, which is still the right shape
     hook_y = _hook_y(layout, hook_y, face)
     ass = build_ass(words if clip.get("captions", True) else [], start, end, hook, clip.get("style", "bounce"),
-                    clip.get("highlight_words", []), hook_y, cap_y)
+                    clip.get("highlight_words", []), hook_y, cap_y, interactions=clip.get("interactions"),
+                    language=clip.get("caption_language", clip.get("text_language", "en")))
     # The clip is made in a short work folder and moved into place afterwards. The caption step of ffmpeg cannot
     # open files whose full path is longer than 260 characters on Windows, which a data folder deep inside other
     # folders easily reaches. Inside the work folder every name is short and relative (a drive colon would also

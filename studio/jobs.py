@@ -111,7 +111,7 @@ on_clip_ready: list = []   # callbacks (job, clip), run once when a clip first f
 
 DEFAULTS = {"max_clips": 6, "min_len": 15, "max_len": 60, "style": "bounce", "layout": "blur", "quality": 720,
             "range_start": None, "range_end": None, "captions": True, "hook_text": "", "description_text": "",
-            "lang": "en"}   # lang: the language spoken
+            "lang": "en", "interactions": []}   # lang: the language spoken
 
 
 LIMITS = {"max_clips": (1, 20), "min_len": (5, 120), "max_len": (10, 180), "quality": (360, 1080)}
@@ -121,6 +121,9 @@ def clean_options(options) -> dict:
     """Only known settings, each inside its allowed range. Raises ValueError on nonsense."""
     out = {}
     for k, v in (options if isinstance(options, dict) else {}).items():
+        if k == "interactions":
+            out[k] = creators.clean_interactions(v)
+            continue
         if k == "captions":
             if not isinstance(v, bool):
                 raise ValueError("Captions must be on or off.")
@@ -317,7 +320,7 @@ def create(source: dict, options: dict, enqueue=True, creator=None, kind="video"
     c = creators.get(creator) if creator else None
     if c:
         d = creators.root(c["id"]) / ("live" if kind == "live" else "videos") / jid
-        base = {**DEFAULTS, **{k: c[k] for k in ("max_clips", "min_len", "max_len", "style", "layout", "captions", "lang") if k in c},
+        base = {**DEFAULTS, **{k: c[k] for k in ("max_clips", "min_len", "max_len", "style", "layout", "captions", "lang", "interactions") if k in c},
                 "hook_text": creators.clean_hook(c.get("hook_text")),
                 "description_text": creators.clean_description(c.get("description_text"))}
     else:
@@ -454,6 +457,8 @@ def request_render(jid, cid, changes: dict):
 
 def _render_changes(job, clip, changes):
     new = dict(clip)
+    if "interactions" in changes:
+        new.update(clean_options({"interactions": changes["interactions"]}))
     if "captions" in changes:
         new.update(clean_options({"captions": changes["captions"]}))
     if "segments" in changes:
@@ -563,7 +568,7 @@ def render_one(job, clip, words):
                 clip["end"] = min(clip["end"], job["duration"])
             near = _caption_words(job, clip, words, off) if clip.get("captions", True) else []
             local = dict(clip, start=clip["start"] - off, end=clip["end"] - off,
-                         hook=roman.to_roman(clip.get("hook") or ""))
+                         hook=roman.to_roman(clip.get("hook") or ""), caption_language=language)
             speech = [dict(w, s=w["s"] - off, e=w["e"] - off) for w in words
                       if w["e"] > clip["start"] and w["s"] < clip["end"]]
             out = render.render_clip(src, d / "clips", clip["id"], local, near, job["width"], job["height"],
@@ -617,7 +622,8 @@ def _render_sequence(job, clip, words):
                                      e=round(min(w["e"], end) - start + elapsed, 2), cut=cut)
                                 for w in prepared[start, end] if start <= w["s"] < end)
             elapsed = cut
-        local = dict(clip, start=0, end=elapsed, hook=roman.to_roman(clip.get("hook") or ""))
+        local = dict(clip, start=0, end=elapsed, hook=roman.to_roman(clip.get("hook") or ""),
+                     caption_language=clip.get("caption_language", job.get("caption_language", "en")))
         source = inputs[0][0]
         dimensions = job if job.get("width") and job.get("height") else media.probe(source)
         return render.render_clip(source, d / "clips", clip["id"], local, captions,
@@ -1019,7 +1025,7 @@ def _run_job(job):
         for c in found:
             c.update(id=f"clip{len(job['clips']) + 1:02d}", start=round(c["start"] + shift, 2),
                      end=round(c["end"] + shift, 2), style=o["style"], layout=o["layout"],
-                     captions=o.get("captions", True), status="queued", version=0,
+                     captions=o.get("captions", True), interactions=list(o.get("interactions", [])), status="queued", version=0,
                      text_language=job.get("caption_language", "en"))
             if o.get("hook_text"):        # the person's own big text, on every clip, in place of the AI's
                 c["hook"], c["fixed_hook"] = o["hook_text"], True

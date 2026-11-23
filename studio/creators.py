@@ -22,7 +22,7 @@ DEFAULTS = {"name": "", "channel": "", "style": "bounce", "layout": "blur", "cap
             "autopost": False, "accounts": [], "post_min_score": 75, "post_gap_min": 45, "daily_cap_enabled": False, "daily_cap": 6,
             "post_window_enabled": False, "post_start_time": "09:00", "post_end_time": "21:00",
             "privacy": "public", "post_footer": "", "rate_per_1k": 0.0, "channels": {},
-            "lang": "en"}
+            "lang": "en", "interactions": []}
 PLATFORMS = ("youtube", "twitch", "kick")
 
 
@@ -30,6 +30,14 @@ def clean_hook(v) -> str:
     """The big text a person typed for their clips: one line, as they wrote it (links and @names stay, a campaign
     may need them), and short enough to sit in the box on the video."""
     return " ".join("".join(ch if ch.isprintable() else " " for ch in str(v or "")).split())[:60]
+
+
+def clean_interactions(value) -> list:
+    """Only the ready-made audience requests, each selected at most once."""
+    from .render import INTERACTIONS
+    if not isinstance(value, list) or any(not isinstance(action, str) or action not in INTERACTIONS for action in value):
+        raise ValueError("Audience requests must be a list of valid actions.")
+    return list(dict.fromkeys(value))
 
 
 def clean_description(v) -> str:
@@ -71,6 +79,10 @@ def root(cid) -> Path:
 def _clean(data: dict) -> dict:
     out = {}
     for k in DEFAULTS:
+        if k == "interactions":
+            if k in data:
+                out[k] = clean_interactions(data[k])
+            continue
         if k in ("post_start_time", "post_end_time") and k in data:
             if not isinstance(data[k], str) or not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", data[k]):
                 raise ValueError("Enter posting times in HH:MM format, from 00:00 to 23:59.")

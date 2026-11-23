@@ -120,7 +120,7 @@ before = a2.get("/api/sync").json()
 check("an account starts without custom clip templates", before.get("clip_templates"), [])
 options = {"max_clips": 3, "min_len": 20, "max_len": 45, "style": "clean", "layout": "split",
            "quality": 1080, "captions": False, "range_start": 60, "range_end": 180,
-           "hook_text": "Texto fixo", "description_text": "Descrição exata.", "lang": "pt"}
+           "hook_text": "Texto fixo", "description_text": "Descrição exata.", "lang": "pt", "interactions": ["like", "save"]}
 r = a2.post(templates, json={"name": "  Entrevista  ", "options": options, "user": ub["id"]}, headers=ORIGIN)
 check("alice can save a clip template", r.status_code, 200)
 if r.is_success:

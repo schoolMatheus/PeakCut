@@ -229,6 +229,12 @@ label.ck{display:inline-flex;align-items:center;gap:8px;height:36px;padding:0 13
 label.ck:has(input:checked){background:var(--brand-soft);border-color:var(--brand-line);color:var(--brand-ink)}
 label.ck input{accent-color:var(--brand);margin:0}
 [data-caption-style]:disabled{opacity:.45;cursor:default}
+.interaction-options{border:0;padding:0;margin:0;min-width:0}
+.interaction-options legend{padding:0;margin-bottom:8px}
+.interaction-options .help{margin:0 0 12px}
+.interaction-checks{display:flex;flex-wrap:wrap;gap:8px}
+.interaction-checks label.ck{height:auto;min-height:44px}
+.interaction-checks input:focus-visible{outline:2px solid var(--brand-deep);outline-offset:3px}
 .fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:18px}
 .span{grid-column:1/-1}
 
@@ -1490,6 +1496,7 @@ function drawAdd(variant) {
       <div class="ob"><div class="ot">${i18n.html("Video quality")}</div><input type="hidden" id="o_quality" value="720"><div class="seg" role="group" aria-label="${i18n.html("Video quality")}">
         <button type="button" data-seg="o_quality" data-v="720" aria-pressed="true">720p<small>${i18n.html("Fast")}</small></button>
         <button type="button" data-seg="o_quality" data-v="1080" aria-pressed="false">1080p<small>${i18n.html("Sharper, about 2x slower")}</small></button></div></div>
+      <div class="ob wide">${interactionOptions(c?.interactions || [])}</div>
       <div class="ob"><div class="ot">${i18n.html("Part of the video")}</div><div class="range">
         <label>${i18n.html("From")}<input id="o_from" type="number" min="0" placeholder="${i18n.html("start")}" aria-label="${i18n.html("From minute")}">min</label>${ic("arrowr")}
         <label>${i18n.html("To")}<input id="o_to" type="number" min="0" placeholder="${i18n.html("end")}" aria-label="${i18n.html("Up to minute")}">min</label></div></div>
@@ -1499,6 +1506,13 @@ function drawAdd(variant) {
   drawAtt();
 }
 const LAYOUT_SHORT = {blur:i18n.t("Blurred fill"), zoom:i18n.t("Zoomed in"), crop:i18n.t("Fill screen"), left:i18n.t("Keep left"), right:i18n.t("Keep right"), fit:i18n.t("Full frame"), split:i18n.t("Two people"), gameplay:"Gameplay + facecam"};
+const INTERACTION_LABELS = {subscribe:"Subscribe to the channel", like:"Like the video", comment:"Leave a comment", share:"Share the video", save:"Save the video"};
+function interactionOptions(selected) {
+  return `<fieldset class="interaction-options"><legend class="ot">${i18n.html("Audience interaction")}</legend>
+    <p class="help">${i18n.html("Optional animated requests, one at a time, without covering captions.")}</p>
+    <div class="interaction-checks">${Object.entries(INTERACTION_LABELS).map(([id, label]) =>
+      `<label class="ck"><input type="checkbox" data-interaction value="${id}"${selected.includes(id) ? " checked" : ""}>${i18n.html(label)}</label>`).join("")}</div></fieldset>`;
+}
 const speechLangs = () => S.status.speech || {en:{label:"English", state:"ready", size_mb:0}};
 const langName = k => i18n.t(speechLangs()[k]?.label || k);
 function langSeg(value) {
@@ -1576,7 +1590,8 @@ const targetCreator = () => creatorId() || $("#o_creator")?.value || "";
 function jobOptions() {
   const n = id => { const v = $(id).value; return v === "" ? null : Number(v); };
   const o = {max_clips:n("#o_max"), min_len:n("#o_min"), max_len:n("#o_maxlen"), captions:$("#o_captions").checked, style:$("#o_style").value, layout:$("#o_layout").value, quality:n("#o_quality"),
-    hook_text:$("#o_hook").value.trim(), description_text:$("#o_desc").value.trim(), lang:$("#o_lang")?.value || "en"};
+    hook_text:$("#o_hook").value.trim(), description_text:$("#o_desc").value.trim(), lang:$("#o_lang")?.value || "en",
+    interactions:$$("#addform [data-interaction]:checked").map(i => i.value)};
   if (n("#o_from") !== null) o.range_start = n("#o_from") * 60;
   if (n("#o_to") !== null) o.range_end = n("#o_to") * 60;
   return o;
@@ -1587,7 +1602,11 @@ const READY_TEMPLATES = [
   {id:"interview", name:"Interviews and talking clips", options:{max_clips:3, min_len:30, max_len:90, captions:true, style:"clean", layout:"zoom", quality:1080}},
   {id:"gaming", name:"Gameplay with facecam", options:{max_clips:5, min_len:15, max_len:60, captions:true, style:"hype", layout:"gameplay", quality:720}},
 ];
-function setClipOptions(o, captionsOverridden = true) {
+function setClipOptions(o, captionsOverridden = true, interactionsOverridden = true) {
+  if (interactionsOverridden) {
+    $$("#addform [data-interaction]").forEach(i => i.checked = (o.interactions || []).includes(i.value));
+    $("#addform .interaction-options").dataset.overridden = "true";
+  }
   $("#o_max").value = o.max_clips ?? "";
   $("#o_min").value = o.min_len ?? "";
   $("#o_maxlen").value = o.max_len ?? "";
@@ -1611,13 +1630,14 @@ const clipOptionsKey = () => `peakcut_clip_options:${S.status.user.id}:${draftKe
 function rememberClipOptions() {
   if (!S.status.user?.id) return;
   const captionsOverridden = $("#o_captions").dataset.overridden === "true";
-  try { localStorage.setItem(clipOptionsKey(), JSON.stringify({options:jobOptions(), captionsOverridden})); } catch {}
+  const interactionsOverridden = $("#addform .interaction-options").dataset.overridden === "true";
+  try { localStorage.setItem(clipOptionsKey(), JSON.stringify({options:jobOptions(), captionsOverridden, interactionsOverridden})); } catch {}
 }
 function restoreClipOptions() {
   if (!S.status.user?.id) return;
   try {
     const saved = JSON.parse(localStorage.getItem(clipOptionsKey()));
-    if (saved?.options) setClipOptions(saved.options, saved.captionsOverridden === true);
+    if (saved?.options) setClipOptions(saved.options, saved.captionsOverridden === true, saved.interactionsOverridden === true);
   } catch {}
 }
 
@@ -1628,7 +1648,8 @@ function clipTemplateHtml(template, custom) {
   const labels = [["How many", o.max_clips], ["Shortest", `${o.min_len} s`], ["Longest", `${o.max_len} s`],
     ["Generate captions", i18n.t(o.captions ? "Yes" : "No")], ["Caption style", i18n.t(S.status.styles[o.style] || o.style)],
     ["Layout", i18n.t(LAYOUT_SHORT[o.layout] || S.status.layouts[o.layout] || o.layout)],
-    ["Video quality", `${o.quality}p`], ["Part of the video", range]];
+    ["Video quality", `${o.quality}p`], ["Part of the video", range],
+    ["Audience interaction", (o.interactions || []).map(id => i18n.t(INTERACTION_LABELS[id] || id)).join(", ") || i18n.t("None")]];
   return `<details class="clip-template" data-template="${esc(id)}">
     <summary>${esc(custom ? template.name : i18n.t(template.name))}${ic("caret")}</summary>
     <dl class="template-values">${labels.map(([label, value]) => `<div><dt>${i18n.html(label)}</dt><dd>${esc(value)}</dd></div>`).join("")}</dl>
@@ -2173,6 +2194,7 @@ function drawCreatorForm() {
       <div class="fields"><label class="sw span"><input type="checkbox" data-k="captions" data-caption-toggle ${c.captions === false ? "" : "checked"}>${i18n.html("Generate captions")}</label>
         <label class="f">${i18n.html("Caption style")}<select data-k="style" data-caption-style ${c.captions === false ? "disabled" : ""}>${opts(S.status.styles, c.style)}</select></label>
         <label class="f">Layout<select data-k="layout">${opts(S.status.layouts, c.layout)}</select></label>
+        <div class="span">${interactionOptions(c.interactions || [])}</div>
         <label class="f">${i18n.html("Game")}<input data-k="game" value="${esc(c.game || "")}" placeholder="${i18n.html("Read from the title")}"><small class="sub" style="font-weight:400">${i18n.html("Left empty, the game is read from the stream's title. Set it for a streamer whose title says nothing: GTA 6, Fortnite, Elden Ring.")}</small></label>
         <label class="f">${i18n.html("Shortest clip (seconds)")}<input data-k="min_len" type="number" value="${c.min_len}"></label>
         <label class="f">${i18n.html("Longest clip (seconds)")}<input data-k="max_len" type="number" value="${c.max_len}"></label>
@@ -2241,7 +2263,7 @@ function updatePostingWindow() {
   if (count > 6) times.push("…", format(first + (count - 1) * step));
   preview.textContent = i18n.t("Up to {0} posts per account each day: {1}. Missed times wait for the next available slot.", count, times.join(" · "));
 }
-const creatorForm = () => { const d = {}; $$("#cform [data-k]").forEach(i => { if (i.disabled && ["post_start_time", "post_end_time"].includes(i.dataset.k)) return; if (i.type === "radio") { if (i.checked) d[i.dataset.k] = i.value; } else d[i.dataset.k] = i.type === "checkbox" ? i.checked : i.value; }); d.accounts = $$("#cform [data-acc]:checked").map(i => i.value); return d; };
+const creatorForm = () => { const d = {}; $$("#cform [data-k]").forEach(i => { if (i.disabled && ["post_start_time", "post_end_time"].includes(i.dataset.k)) return; if (i.type === "radio") { if (i.checked) d[i.dataset.k] = i.value; } else d[i.dataset.k] = i.type === "checkbox" ? i.checked : i.value; }); d.accounts = $$("#cform [data-acc]:checked").map(i => i.value); d.interactions = $$("#cform [data-interaction]:checked").map(i => i.value); return d; };
 const dirty = on => $("#savebar")?.classList.toggle("on", on);
 async function saveCreator(quiet) {
   updatePostingWindow();
@@ -3059,6 +3081,7 @@ function drawClipEditor(full) {
             <label class="sw"><input type="checkbox" data-f="captions" data-caption-toggle ${c.captions === false ? "" : "checked"}>${i18n.html("Generate captions")}</label>
             <div class="two"><label class="f">${i18n.html("Caption style")}<select data-f="style" data-caption-style ${c.captions === false ? "disabled" : ""}>${opts(S.status.styles, c.style)}</select></label>
               <label class="f">${i18n.html("Layout")}<select data-f="layout">${opts(S.status.layouts, c.layout)}</select></label></div>
+            ${interactionOptions(c.interactions || [])}
             <label class="f">${i18n.html("Title")}<input data-f="title" value="${esc(c.title)}"></label>
             <label class="f">${i18n.html("Description")}<textarea data-f="description" rows="2">${esc(c.description)}</textarea></label>
             <label class="f">${i18n.html("Hashtags")}<input data-f="hashtags" value="${esc((c.hashtags || []).join(" "))}"></label>
@@ -3232,6 +3255,9 @@ document.addEventListener("change", async e => {
   }
   if (t.id === "o_creator") {
     const toggle = $("#o_captions"), c = S.creators.find(c => c.id === t.value);
+    if (!$("#addform .interaction-options").dataset.overridden) {
+      $$("#addform [data-interaction]").forEach(i => i.checked = (c?.interactions || []).includes(i.value));
+    }
     if (!toggle.dataset.overridden) { toggle.checked = c?.captions !== false; syncCaptionStyle(toggle); }
     const hk = $("#o_hook"); if (hk && !hk.dataset.typed) hk.value = c?.hook_text || "";      // the creator's own text, unless one was typed here
     const ds = $("#o_desc"); if (ds && !ds.dataset.typed) ds.value = c?.description_text || "";
@@ -3239,6 +3265,7 @@ document.addEventListener("change", async e => {
     return;
   }
   if (["o_hook", "o_desc", "o_lang"].includes(t.id)) { t.dataset.typed = "1"; rememberClipOptions(); }
+  if (t.matches("#addform [data-interaction]")) { t.closest("fieldset").dataset.overridden = "true"; rememberClipOptions(); }
   if (t.hasAttribute("data-caption-toggle")) {
     if (t.id === "o_captions") t.dataset.overridden = "true";
     syncCaptionStyle(t);
@@ -3657,6 +3684,7 @@ document.addEventListener("click", async e => {
       const body = {}; $$("[data-f]", editor.root).forEach(i => {
         body[i.dataset.f] = i.type === "checkbox" ? i.checked : i.value;
       });
+      body.interactions = $$("[data-interaction]:checked", editor.root).map(i => i.value);
       if (D.changed) body.segments = D.segments;
       D.sending = true;
       updateEditButtons();
