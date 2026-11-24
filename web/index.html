@@ -2596,7 +2596,7 @@ async function drawSettings() {
             <select id="censorship_mode">${opts({off:i18n.t("Off"), captions:i18n.t("Captions and opening text"), audio:i18n.t("Audio only"), both:i18n.t("Captions, opening text and audio")}, s.censorship_mode || "off")}</select></label>
           <label class="f" for="censorship_words">${i18n.html("Words to censor")}
             <textarea id="censorship_words" rows="8" maxlength="10000" aria-describedby="censorship-help">${esc(s.censorship_words || "")}</textarea>
-            <span class="hint" id="censorship-help">${i18n.html("Separate words with commas or new lines. Matches whole words, ignoring case and accents. Captions use asterisks; audio is silenced. Up to 500 words.")}</span></label>
+            <span class="hint" id="censorship-help">${i18n.html("Separate words with commas or new lines. Matches whole words, ignoring case and accents. Censored words swap their vowels for symbols (@ for a, 3 for e, 1 for i, * for o, # for u); audio is silenced. Up to 500 words.")}</span></label>
           <p class="help">${i18n.html("Audio censorship follows the original transcript. Review your clip: words missed by speech recognition may still be audible. For translated captions, also add the words in the spoken language.")}</p>
           <div class="row"><button class="btn primary" data-act="censorshipsave">${i18n.html("Save")}</button><span class="help" id="censorship-result" role="status" aria-live="polite"></span></div>
         </div></section>`;

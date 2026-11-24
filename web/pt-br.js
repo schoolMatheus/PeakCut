@@ -63,7 +63,7 @@ const peakcutPortuguese = {
   "Audio only": "Somente áudio",
   "Captions, opening text and audio": "Legendas, texto de abertura e áudio",
   "Words to censor": "Palavras para censurar",
-  "Separate words with commas or new lines. Matches whole words, ignoring case and accents. Captions use asterisks; audio is silenced. Up to 500 words.": "Separe as palavras por vírgulas ou quebras de linha. A censura busca palavras inteiras, sem diferenciar maiúsculas ou acentos. Nas legendas, usa asteriscos; no áudio, silencia o trecho. Até 500 palavras.",
+  "Separate words with commas or new lines. Matches whole words, ignoring case and accents. Censored words swap their vowels for symbols (@ for a, 3 for e, 1 for i, * for o, # for u); audio is silenced. Up to 500 words.": "Separe as palavras por vírgulas ou quebras de linha. A censura busca palavras inteiras, sem diferenciar maiúsculas ou acentos. Nas legendas, as vogais viram símbolos (@ para a, 3 para e, 1 para i, * para o, # para u); no áudio, silencia o trecho. Até 500 palavras.",
   "Audio censorship follows the original transcript. Review your clip: words missed by speech recognition may still be audible. For translated captions, also add the words in the spoken language.": "A censura no áudio segue a transcrição original. Revise o corte: palavras que o reconhecimento de voz não identificou ainda podem ser ouvidas. Se as legendas forem traduzidas, adicione também as palavras no idioma falado.",
   "Choose a valid censorship mode.": "Escolha uma opção válida de censura.",
   "Enter the words to censor as text.": "Digite as palavras para censurar em formato de texto.",
