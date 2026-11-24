@@ -1,6 +1,5 @@
 """Audience requests stay optional, sequential and clear of spoken captions."""
 import os
-import re
 import sys
 import tempfile
 import unittest
@@ -11,14 +10,6 @@ sys.path.insert(0, ".")
 TEMP = tempfile.TemporaryDirectory(prefix="pc-interactions-")
 os.environ.update(PEAKCUT_DATA=TEMP.name, DATABASE_URL="", PEAKCUT_ACCOUNTS="0")
 from studio import accounts, auth, creators, ctx, db, jobs, live, render, server  # noqa: E402
-
-ACTIONS = ["subscribe", "like", "comment", "share", "save"]
-
-
-def seconds(value):
-    hours, minutes, seconds = map(float, value.split(":"))
-    return hours * 3600 + minutes * 60 + seconds
-
 
 class InteractionTests(unittest.TestCase):
     @classmethod
@@ -65,38 +56,6 @@ class InteractionTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 creators.update(creator["id"], {"interactions": ["unknown"]})
 
-    def test_short_clips_schedule_every_request_once_without_overlap(self):
-        for duration in (3, 5, 15, 60, 180):
-            with self.subTest(duration=duration):
-                ass = render.build_ass([], 20, 20 + duration, "", "bounce", [], 300, 1380,
-                                       interactions=ACTIONS, language="pt-BR")
-                lines = [line.split(",", 9) for line in ass.splitlines()
-                         if line.startswith("Dialogue:") and ",Interaction," in line and "\\p1" not in line]
-                self.assertEqual(len(lines), 5)
-                spans = [(seconds(line[1]), seconds(line[2])) for line in lines]
-                self.assertTrue(all(0 <= start < end <= duration for start, end in spans))
-                self.assertTrue(all(end <= start for (_, end), (start, _) in zip(spans, spans[1:])))
-                self.assertTrue(all("\\move(" in line[9] and "\\fad(" in line[9] for line in lines))
-                self.assertIn("Inscreva-se no canal", ass)
-                self.assertIn("Salve este vídeo", ass)
-
-    def test_each_layout_keeps_motion_outside_caption_and_title_bands(self):
-        for layout in render.LAYOUTS:
-            for dimensions in ((1920, 1080), (1080, 1920), (1000, 1000)):
-                with self.subTest(layout=layout, dimensions=dimensions):
-                    _, _, hook_y, cap_y = render.geometry(*dimensions, layout)
-                    ass = render.build_ass([{"w": "spoken", "s": 1., "e": 2.}], 0, 5,
-                                           "A title on two lines", "hype", [], hook_y, cap_y,
-                                           interactions=["like"], language="en")
-                    line = next(line for line in ass.splitlines() if ",Interaction," in line and "\\p1" not in line)
-                    motion = re.search(r"\\move\(([^)]+)\)", line)
-                    _, first_y, _, last_y, *_ = map(float, motion[1].split(","))
-                    for y in (first_y, last_y):
-                        self.assertGreaterEqual(abs(y - cap_y), 175)
-                        self.assertGreaterEqual(abs(y - hook_y), 220)
-                        self.assertTrue(100 <= y <= 1720)
-                    self.assertIn(",Cap,", ass)
-
     def test_captions_off_still_renders_requests(self):
         with patch.object(render, "_render_in", return_value={}) as encode:
             render.render_clip(Path(TEMP.name) / "unused.mp4", Path(TEMP.name) / "out", "test",
@@ -104,7 +63,8 @@ class InteractionTests(unittest.TestCase):
                                 "interactions": ["comment"], "caption_language": "pt-BR"},
                                [{"w": "spoken", "s": 1., "e": 2.}], 1920, 1080)
         ass = encode.call_args.args[8]
-        self.assertIn("Deixe seu comentário", ass)
+        self.assertEqual(encode.call_args.kwargs["motions"][0]["action"], "comment")
+        self.assertEqual(encode.call_args.kwargs["motions"][0]["asset"].parent.name, "pt-BR")
         self.assertNotIn(",Cap,", ass)
 
 

@@ -34,8 +34,8 @@ def clean_hook(v) -> str:
 
 def clean_interactions(value) -> list:
     """Only the ready-made audience requests, each selected at most once."""
-    from .render import INTERACTIONS
-    if not isinstance(value, list) or any(not isinstance(action, str) or action not in INTERACTIONS for action in value):
+    from .interactions import ACTIONS
+    if not isinstance(value, list) or any(not isinstance(action, str) or action not in ACTIONS for action in value):
         raise ValueError("Audience requests must be a list of valid actions.")
     return list(dict.fromkeys(value))
 

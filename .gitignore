@@ -30,3 +30,6 @@ __pycache__/
 .venv/
 venv/
 .pytest_cache/
+
+# ---- generated video previews
+outputs/

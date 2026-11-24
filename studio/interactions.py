@@ -1,0 +1,93 @@
+"""Timed audience motions and their sound effects, ready for the video renderer."""
+import shutil
+from pathlib import Path
+
+WIDTH, HEIGHT, DURATION = 800, 240, 4.0
+ASSETS = Path(__file__).resolve().parent / "assets" / "interactions"
+SOUNDS = {
+    "woosh": "ribhavagrawal-woosh-230554.mp3",
+    "click": "universfield-computer-mouse-click-352734.mp3",
+    "typing": "son_duquotidient-son-clavier-iphone-478600.mp3",
+}
+ACTIONS = ("subscribe", "like", "comment", "share", "save")
+
+
+def plan(actions, duration, hook_y, cap_y, language="en") -> list:
+    """Image and sound use the same clip-relative clock, including shortened clips."""
+    actions = list(dict.fromkeys(a for a in (actions or []) if isinstance(a, str) and a in ACTIONS))
+    if not actions or duration <= .5:
+        return []
+    candidates = (cap_y + 260, cap_y - 280, 1620, 700)
+    center = next((y for y in candidates if 160 <= y <= 1620 and abs(y - cap_y) >= 260
+                   and abs(y - hook_y) >= 300), None)
+    if center is None:
+        return []
+    language = "pt-BR" if language == "pt-BR" else "en"
+    slot = (duration - .4) / len(actions)
+    hold = min(DURATION, slot - min(.15, slot * .15))
+    motions = []
+    for i, action in enumerate(actions):
+        start = .2 + i * slot + (slot - hold) / 2
+        end = start + hold
+        rate = hold / DURATION
+        # Start at the audible cue, rather than the MP3's leading silence. Use the same
+        # speed as the artwork so tiny motions still contain the click and keyboard taps.
+        sounds = [{"name": "woosh", "start": start, "end": min(end, start + .829375 * rate),
+                   "source_start": .32, "source_duration": .829375, "rate": rate, "gain": .6}]
+        if action == "comment":
+            sounds.append({"name": "typing", "start": start + 28 / 30 * rate,
+                           "end": start + 76 / 30 * rate, "source_start": .2, "source_duration": 1.6,
+                           "rate": rate, "gain": .6})
+        click = (88 if action == "comment" else 48) / 30 * rate
+        sounds.append({"name": "click", "start": start + click, "end": min(end, start + click + .498 * rate),
+                       "source_start": .15, "source_duration": .498, "rate": rate, "gain": .6})
+        motions.append({"action": action, "start": start, "end": end, "rate": rate,
+                        "x": (1080 - WIDTH) / 2, "y": center - HEIGHT / 2,
+                        "asset": ASSETS / language / f"{action}.webm", "sounds": sounds})
+    return motions
+
+
+def compose(work: Path, motions: list, first_input: int, duration: float):
+    """Add alpha videos and quiet sounds to existing [v] and [normalized] tracks."""
+    inputs, filters = [], []
+    video = "v"
+    for i, m in enumerate(motions):
+        name = f"m{i}.webm"
+        shutil.copyfile(m["asset"], work / name)
+        # ffmpeg's native VP9 decoder drops alpha; libvpx decodes the transparent plane.
+        inputs += ["-c:v", "libvpx-vp9", "-i", name]
+        filters.append(f"[{first_input+i}:v]setpts=(PTS-STARTPTS)*{m['rate']:.8f}+{m['start']:.8f}/TB,format=rgba[m{i}]")
+        next_video = f"mv{i}"
+        filters.append(f"[{video}][m{i}]overlay={m['x']:.0f}:{m['y']:.0f}:eof_action=pass:repeatlast=0:"
+                       f"enable='gte(t,{m['start']:.8f})*lt(t,{m['end']:.8f})'[{next_video}]")
+        video = next_video
+    effects = [s for m in motions for s in m["sounds"]]
+    used = list(dict.fromkeys(s["name"] for s in effects))
+    for i, name in enumerate(used):
+        source = f"s{i}.mp3"
+        shutil.copyfile(ASSETS / "sounds" / SOUNDS[name], work / source)
+        inputs += ["-i", source]
+        selected = [j for j, s in enumerate(effects) if s["name"] == name]
+        branches = "".join(f"[raw{j}]" for j in selected)
+        filters.append(f"[{first_input+len(motions)+i}:a]asplit={len(selected)}{branches}")
+        for j in selected:
+            s = effects[j]
+            length = s["end"] - s["start"]
+            fade = min(.03, length / 4)
+            tempo, tempo_filters = 1 / s["rate"], []
+            while tempo > 2:
+                tempo_filters.append("atempo=2")
+                tempo /= 2
+            tempo_filters.append(f"atempo={tempo:.8f}")
+            filters.append(f"[raw{j}]aresample=48000,aformat=channel_layouts=stereo,"
+                           f"atrim=start={s['source_start']:.8f}:duration={s['source_duration']:.8f},"
+                           f"asetpts=PTS-STARTPTS,{','.join(tempo_filters)},apad=whole_dur={length:.8f},"
+                           f"atrim=duration={length:.8f},volume={s['gain']:.6f},afade=t=out:st={length-fade:.8f}:d={fade:.8f},"
+                           f"adelay={round(s['start']*48000)}S:all=1[fx{j}]")
+    sounds = "".join(f"[fx{j}]" for j in range(len(effects)))
+    # Never normalize a quiet effect up. The limiter also disables automatic makeup gain.
+    filters.append(f"[normalized]apad=whole_dur={duration:.8f},atrim=duration={duration:.8f}[base_audio]")
+    filters.append(f"[base_audio]{sounds}amix=inputs={len(effects)+1}:duration=first:normalize=0,"
+                   f"alimiter=limit=0.95:level=0:latency=1,atrim=duration={duration:.8f}[motion_a]")
+    filters.append(f"[{video}]null[motion_v]")
+    return inputs, ";".join(filters)
