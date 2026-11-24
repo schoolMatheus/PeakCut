@@ -250,6 +250,9 @@ label.ck input{accent-color:var(--brand);margin:0}
 .card>h2{margin-bottom:4px}
 .card>h2+.help{margin-bottom:18px}
 .card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:18px}
+.foldbtn svg{transition:transform .15s ease}
+.foldbtn.folded svg{transform:rotate(-90deg)}
+.card-body[hidden]{display:none}
 .help,.sub{color:var(--dim);font-size:13px}
 .tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:22px;overflow-x:auto;scrollbar-width:none}
 .tabbtn{position:relative;display:inline-flex;align-items:center;gap:8px;height:46px;padding:0 14px;border:0;background:transparent;color:var(--faint);cursor:pointer;font-weight:600;font-size:14px;border-radius:10px 10px 0 0;white-space:nowrap}
@@ -2178,15 +2181,36 @@ async function saveChannels(chs, main) {
   try { await send(`/api/creators/${creatorId()}`, body, "PUT"); await tick(); drawCreatorForm(); }
   catch (e) { toast(e.message, "bad"); }
 }
+const openedCards = new Set();               // cards start folded; only the ones the person opens are here
+const cardFolded = id => !openedCards.has(`${creatorId()}:${id}`);
+function foldBtn(id) {
+  const hidden = cardFolded(id), label = hidden ? "Show this section" : "Hide this section";
+  return `<button type="button" class="btn sm icon ghost foldbtn${hidden ? " folded" : ""}" data-act="foldcard" data-card="${id}" aria-expanded="${!hidden}" title="${i18n.html(label)}" aria-label="${i18n.html(label)}">${ic("caret")}</button>`;
+}
+function unfoldFor(el) {
+  const card = el.closest(".card"), body = card?.querySelector(".card-body");
+  if (!body || !body.hidden) return;
+  const btn = card.querySelector("[data-act='foldcard']");
+  if (btn) openedCards.add(`${creatorId()}:${btn.dataset.card}`);
+  body.hidden = false;
+  if (btn) {
+    btn.classList.remove("folded");
+    btn.setAttribute("aria-expanded", "true");
+    const label = i18n.t("Hide this section");
+    btn.title = label; btn.setAttribute("aria-label", label);
+  }
+}
 function drawCreatorForm() {
   const c = creator(), box = $("#cform"); if (!c || !box) return;
   const A = S.accounts;
   const postIntervals = [5, 10, 15, 30, 45, 60, 90, 120];
   const customPostInterval = !postIntervals.includes(Number(c.post_gap_min));
-  box.innerHTML = `<div class="card"><h2>${i18n.html("Their stream")}</h2><p class="help">${i18n.html("Where to record from, and whether to start by itself.")}</p>
+  box.innerHTML = `<div class="card"><div class="card-head"><div><h2>${i18n.html("Their stream")}</h2><p class="help">${i18n.html("Where to record from, and whether to start by itself.")}</p></div>${foldBtn("stream")}</div>
+      <div class="card-body"${cardFolded("stream") ? " hidden" : ""}>
       <div class="chans">${channelRows(c)}</div>
-      <div class="fields" style="margin-top:14px"><label class="sw span"><input type="checkbox" data-k="auto_watch" ${c.auto_watch ? "checked" : ""}><span>${i18n.html("Record automatically when they go live")}<small>${i18n.html("Checks straight away, then every two minutes.")}</small></span></label></div></div>
-    <div class="card"><h2>${i18n.html("How the AI decides")}</h2><p class="help">${i18n.html("Two separate AI checks. The words judge reads only what was said. The reaction judge sees only how loud the streamer got and how busy chat was, never the words.")}</p>
+      <div class="fields" style="margin-top:14px"><label class="sw span"><input type="checkbox" data-k="auto_watch" ${c.auto_watch ? "checked" : ""}><span>${i18n.html("Record automatically when they go live")}<small>${i18n.html("Checks straight away, then every two minutes.")}</small></span></label></div></div></div>
+    <div class="card"><div class="card-head"><div><h2>${i18n.html("How the AI decides")}</h2><p class="help">${i18n.html("Two separate AI checks. The words judge reads only what was said. The reaction judge sees only how loud the streamer got and how busy chat was, never the words.")}</p></div>${foldBtn("ai")}</div>
+      <div class="card-body"${cardFolded("ai") ? " hidden" : ""}>
       <div class="fields">
         <label class="f">${i18n.html("Check the live stream every")}<select data-k="ai_every_min">${opts({1:i18n.t("1 minute"), 2:i18n.t("2 minutes"), 3:i18n.t("3 minutes"), 5:i18n.t("5 minutes"), 10:i18n.t("10 minutes")}, c.ai_every_min || 3)}</select><small class="sub" id="costhint" style="font-weight:400">${costHint(c.ai_every_min)}</small></label>
         <p class="help span" style="margin:0">${i18n.html("On top of that, the AI always looks straight away when the stream suddenly gets louder or chat gets busier, and when someone says \"clip\" or \"clip it\".")}</p>
@@ -2196,8 +2220,9 @@ function drawCreatorForm() {
         <label class="f">${i18n.html("Make sure there's a live clip at least every")}<select data-k="must_clip_min">${opts({0:i18n.t("Off"), 15:i18n.t("15 minutes"), 30:i18n.t("30 minutes"), 60:i18n.t("1 hour"), 120:i18n.t("2 hours")}, c.must_clip_min)}</select></label>
         <label class="f">${i18n.html("Minimum gap between live clips (minutes)")}<input data-k="min_gap_min" type="number" min="0" max="60" value="${c.min_gap_min}"></label>
         <label class="f span">${i18n.html("Always clip the last 30 seconds when someone says")}<input data-k="trigger_words" value="${esc(c.trigger_words)}" placeholder="clip that, clip it"><small class="sub" style="font-weight:400">${i18n.html("Separate phrases with commas. Matched on the transcript, so it needs no AI call.")}</small></label>
-      </div></div>
-    <div class="card"><h2>${i18n.html("Clips")}</h2><p class="help">${i18n.html("How this creator's clips look.")}</p>
+      </div></div></div>
+    <div class="card"><div class="card-head"><div><h2>${i18n.html("Clips")}</h2><p class="help">${i18n.html("How this creator's clips look.")}</p></div>${foldBtn("clips")}</div>
+      <div class="card-body"${cardFolded("clips") ? " hidden" : ""}>
       <div class="fields"><label class="sw span"><input type="checkbox" data-k="captions" data-caption-toggle ${c.captions === false ? "" : "checked"}>${i18n.html("Generate captions")}</label>
         <label class="f">${i18n.html("Caption style")}<select data-k="style" data-caption-style ${c.captions === false ? "disabled" : ""}>${opts(S.status.styles, c.style)}</select></label>
         <label class="f">Layout<select data-k="layout">${opts(S.status.layouts, c.layout)}</select></label>
@@ -2209,8 +2234,9 @@ function drawCreatorForm() {
         <label class="f">${i18n.html("Spoken language")}<select data-k="lang">${opts(Object.fromEntries(Object.keys(speechLangs()).map(k => [k, langName(k)])), c.lang || "en")}</select></label>
         <label class="f span">${i18n.html("Big text on every clip")}<input data-k="hook_text" maxlength="60" value="${esc(c.hook_text || "")}" placeholder="${i18n.html("Left empty, the AI writes a different one for each clip")}"></label>
         <label class="f span">${i18n.html("Description for every clip")}<textarea data-k="description_text" rows="3" maxlength="2000">${esc(c.description_text || "")}</textarea><small>${i18n.html("Written once, used exactly as typed on every clip.")}</small></label>
-        <label class="f">${i18n.html("Minutes of live stream to keep")}<input data-k="buffer_min" type="number" value="${c.buffer_min}"></label></div></div>
-    <div class="card"><h2>${i18n.html("Posting")}</h2><p class="help">${A.length ? i18n.t("Choose the accounts this creator's clips go to. One account can be shared by several creators.") : i18n.t("No accounts are connected yet. Connect one in Social networks, then come back.")}</p>
+        <label class="f">${i18n.html("Minutes of live stream to keep")}<input data-k="buffer_min" type="number" value="${c.buffer_min}"></label></div></div></div>
+    <div class="card"><div class="card-head"><div><h2>${i18n.html("Posting")}</h2><p class="help">${A.length ? i18n.t("Choose the accounts this creator's clips go to. One account can be shared by several creators.") : i18n.t("No accounts are connected yet. Connect one in Social networks, then come back.")}</p></div>${foldBtn("posting")}</div>
+      <div class="card-body"${cardFolded("posting") ? " hidden" : ""}>
       ${A.length ? `<div class="row" style="margin-bottom:16px">${A.map(a => `<label class="ck"><input type="checkbox" data-acc value="${esc(a.id)}" ${c.accounts.includes(a.id) ? "checked" : ""}>${esc(a.label)} · ${esc(a.name)}</label>`).join("")}</div>` : `<button class="btn" data-act="go" data-v="social" style="margin-bottom:16px">${ic("plug")}${i18n.html("Open Social networks")}</button>`}
       <div class="fields"><label class="sw span"><input type="checkbox" data-k="autopost" ${c.autopost ? "checked" : ""}><span>${i18n.html("Post new clips automatically")}<small>${i18n.html("Clips that score high enough go out without you approving them.")}</small></span></label>
         <label class="f">${i18n.html("Only auto-post clips scoring at least")}<input data-k="post_min_score" type="number" min="0" max="100" value="${c.post_min_score}"></label>
@@ -2238,7 +2264,7 @@ function drawCreatorForm() {
         </div>
         <label class="f">${i18n.html("Who can see posts (YouTube, TikTok)")}<select data-k="privacy">${opts({public:i18n.t("Public"), unlisted:i18n.t("Unlisted"), private:i18n.t("Private")}, c.privacy)}</select></label>
         <label class="f">${i18n.html("Campaign pay per 1,000 views ($)")}<input data-k="rate_per_1k" type="number" step="0.1" min="0" value="${c.rate_per_1k}"></label>
-        <label class="f span">${i18n.html("Line added to every post (credit, campaign tag)")}<input data-k="post_footer" value="${esc(c.post_footer)}" placeholder="Clipped from @streamer"></label></div></div>
+        <label class="f span">${i18n.html("Line added to every post (credit, campaign tag)")}<input data-k="post_footer" value="${esc(c.post_footer)}" placeholder="Clipped from @streamer"></label></div></div></div>
     <div class="card danger-card"><h2>${i18n.html("Delete this creator")}</h2><p class="help">${i18n.html("Removes {0}, their settings and every video and clip filed under them. This cannot be undone.", esc(c.name))}</p>
       <button class="btn danger" data-act="delcreator">${ic("trash")}${i18n.html("Delete creator")}</button></div>
     <div class="savebar" id="savebar"><span>${ic("warn")}${i18n.html("You have unsaved changes")}</span><button class="btn ghost" data-act="cdiscard">${i18n.html("Discard")}</button><button class="btn primary" data-act="csave">${ic("check")}${i18n.html("Save changes")}</button></div>`;
@@ -2325,11 +2351,11 @@ const creatorForm = () => {
 const dirty = on => $("#savebar")?.classList.toggle("on", on);
 async function saveCreator(quiet) {
   updatePostingWindow();
-  for (const input of $$("#posting-window input")) if (!input.reportValidity()) return false;
+  for (const input of $$("#posting-window input")) { unfoldFor(input); if (!input.reportValidity()) return false; }
   const postInterval = $("#cform [data-k='post_gap_min']");
-  if (postInterval && !postInterval.reportValidity()) return false;
+  if (postInterval) { unfoldFor(postInterval); if (!postInterval.reportValidity()) return false; }
   const dailyLimit = $("#cform [data-k='daily_cap']");
-  if (dailyLimit && !dailyLimit.reportValidity()) return false;
+  if (dailyLimit) { unfoldFor(dailyLimit); if (!dailyLimit.reportValidity()) return false; }
   try { await send(`/api/creators/${creatorId()}`, creatorForm(), "PUT"); dirty(false); if (!quiet) toast(i18n.t("Saved"), "ok"); await tick(); return true; }
   catch (e) { toast(e.message, "bad"); return false; }
 }
@@ -3723,6 +3749,17 @@ document.addEventListener("click", async e => {
     if (a === "acctmenu") return openAcct();
     if (a === "bellread") { await markRead(); return openBell().then(openBell); }
     if (a === "ntgo") { closePops(); const l = d.link || ""; if (l.startsWith("/app")) { const [v, tab] = fromPath(l); return go(v, tab); } if (l.startsWith("/")) location.href = l; return; }
+    if (a === "foldcard") {
+      const key = `${creatorId()}:${d.card}`, wasOpen = openedCards.has(key);
+      if (wasOpen) openedCards.delete(key); else openedCards.add(key);
+      const card = b.closest(".card");
+      card.querySelector(".card-body").hidden = wasOpen;
+      b.classList.toggle("folded", wasOpen);
+      b.setAttribute("aria-expanded", String(!wasOpen));
+      const label = i18n.t(wasOpen ? "Show this section" : "Hide this section");
+      b.title = label; b.setAttribute("aria-label", label);
+      return;
+    }
     if (a === "addrange") {
       $("#posting-range-rows").insertAdjacentHTML("beforeend", postingRangeRows({post_windows: [{start: "12:00", end: "14:00"}]}));
       updatePostingWindow(); dirty(true); return;

@@ -1458,6 +1458,8 @@ const peakcutPortuguese = {
   "Add to queue follows each creator's posting hours, fixed times, interval and daily limit.": "Adicionar à fila respeita as faixas de horário, os horários fixos, o intervalo e o limite diário de cada criador.",
   "Set daily posting hours": "Definir horários de publicação",
   "With a daily limit, posts are spread evenly across these ranges. Extra clips wait for the next day.": "Com um limite diário, as publicações são distribuídas entre essas faixas de horário. Os clipes excedentes ficam para o próximo dia.",
+  "Hide this section": "Recolher esta seção",
+  "Show this section": "Expandir esta seção",
   "Time ranges": "Faixas de horário",
   "Add one range for each part of the day. Posts are spread inside these ranges.": "Adicione uma faixa para cada parte do dia. As publicações são distribuídas dentro dessas faixas.",
   "Add time range": "Adicionar faixa de horário",
