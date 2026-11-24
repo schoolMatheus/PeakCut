@@ -397,6 +397,50 @@ def retry(pid):
     _mirror(p)
 
 
+def timeline(creator_id) -> list:
+    """The posts still waiting for this creator, in the order they will go out, with a little of their clip for
+    the page. Only what the signed-in user owns is read, like everywhere else."""
+    with _lock:
+        waiting = sorted((p for p in _mine() if p["creator"] == creator_id and p["status"] == "scheduled"),
+                         key=lambda p: (p["due_at"], p["created"]))
+    out = []
+    for p in waiting:
+        job = jobs.get(p["job"])
+        clip = next((c for c in job["clips"] if c["id"] == p["clip"]), None) if job else None
+        out.append({"id": p["id"], "due_at": p["due_at"], "account": p["account"], "account_name": p["account_name"],
+                    "platform": p["platform"], "title": p["title"], "score": p.get("score", 0),
+                    "immediate": bool(p.get("immediate")), "job": p["job"], "clip": p["clip"],
+                    "cover": (clip or {}).get("cover", ""), "version": (clip or {}).get("version", 0)})
+    return out
+
+
+def reorder(creator_id, ordered_ids) -> int:
+    """Put the waiting posts of each account in the order the person chose, keeping the same times. Moving a video
+    only changes which of those times it goes out at, so the posting hours, fixed times and daily limit still hold."""
+    if not isinstance(ordered_ids, list) or len(ordered_ids) > 500 or any(not isinstance(x, str) for x in ordered_ids):
+        raise ValueError("The new order must be a list of posts.")
+    with _lock:
+        waiting = {p["id"]: p for p in _mine() if p["creator"] == creator_id and p["status"] == "scheduled"}
+        if len(set(ordered_ids)) != len(ordered_ids):
+            raise ValueError("Each post can appear only once in the new order.")
+        if any(pid not in waiting for pid in ordered_ids):
+            raise ValueError("Some of these posts are no longer waiting.")
+        changed = []
+        for account_id in {waiting[pid]["account"] for pid in ordered_ids}:
+            sent = [waiting[pid] for pid in ordered_ids if waiting[pid]["account"] == account_id]
+            slots = sorted(p["due_at"] for p in sent)
+            for p, due in zip(sent, slots):
+                if p["due_at"] != due:
+                    p["due_at"] = due
+                    changed.append(p)
+        if changed:
+            _save()
+            for p in changed:
+                _mirror(p)
+            ctx.bump()
+    return len(changed)
+
+
 def overview() -> dict:
     today = _day(time.time())
     _posts = _mine()  # everything below is about the signed-in user only

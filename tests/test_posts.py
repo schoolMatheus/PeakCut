@@ -425,6 +425,64 @@ class BatchPosts(unittest.TestCase):
         response = self.post()
         self.assertEqual(response.json(), {"queued": 1, "clips": 1, "skipped": 1})
 
+    def reorder(self, order):
+        return self.client.post(f"/api/creators/{self.job['creator']}/timeline", json={"order": order},
+                                headers={"Origin": "http://localhost"})
+
+    def test_timeline_lists_waiting_posts_and_reordering_swaps_their_times(self):
+        with patch("studio.posting.time.time", return_value=datetime(2026, 11, 20, 8).timestamp()):
+            posting.enqueue(self.job, self.job["clips"][0], ["youtube"])
+            posting.enqueue(self.job, self.job["clips"][1], ["youtube"])
+        rows = posting.timeline(self.job["creator"])
+        self.assertEqual([r["title"] for r in rows], ["one", "two"])
+        slots = [r["due_at"] for r in rows]
+        version = ctx.version()
+        response = self.reorder([rows[1]["id"], rows[0]["id"]])
+        self.assertEqual(response.status_code, 200, response.text)
+        after = response.json()["timeline"]
+        self.assertEqual([r["title"] for r in after], ["two", "one"])
+        self.assertEqual(sorted(r["due_at"] for r in after), slots)   # the same posting times, swapped
+        self.assertGreater(ctx.version(), version)
+
+    def test_reordering_one_account_leaves_the_other_accounts_times_alone(self):
+        with patch("studio.posting.time.time", return_value=datetime(2026, 11, 20, 8).timestamp()):
+            posting.enqueue(self.job, self.job["clips"][0], ["youtube", "instagram"])
+            posting.enqueue(self.job, self.job["clips"][1], ["youtube"])
+        youtube = [r for r in posting.timeline(self.job["creator"]) if r["account"] == "youtube"]
+        instagram = {r["id"]: r["due_at"] for r in posting.timeline(self.job["creator"]) if r["account"] == "instagram"}
+        self.assertEqual(self.reorder([youtube[1]["id"], youtube[0]["id"]]).status_code, 200)
+        after = posting.timeline(self.job["creator"])
+        self.assertEqual([r["title"] for r in after if r["account"] == "youtube"], ["two", "one"])
+        self.assertEqual({r["id"]: r["due_at"] for r in after if r["account"] == "instagram"}, instagram)
+
+    def test_reorder_refuses_unknown_finished_or_invented_posts(self):
+        with patch("studio.posting.time.time", return_value=datetime(2026, 11, 20, 8).timestamp()):
+            posting.enqueue(self.job, self.job["clips"][0], ["youtube"])
+            posting.enqueue(self.job, self.job["clips"][1], ["youtube"])
+        rows = posting.timeline(self.job["creator"])
+        saved = [(p["id"], p["due_at"]) for p in posting._posts]
+        for order, expected in (([rows[0]["id"], "nope"], 400),
+                                ([rows[0]["id"], rows[0]["id"]], 400),
+                                ("not-a-list", 400),
+                                ([rows[0]["id"] + "x"], 400)):
+            with self.subTest(order=order):
+                response = self.reorder(order)
+                self.assertEqual(response.status_code, expected, response.text)
+                self.assertEqual([(p["id"], p["due_at"]) for p in posting._posts], saved)
+        response = self.client.post("/api/creators/missing/timeline", json={"order": []},
+                                    headers={"Origin": "http://localhost"})
+        self.assertEqual(response.status_code, 404)
+        posting.cancel(rows[0]["id"])
+        self.assertEqual(self.reorder([rows[0]["id"]]).status_code, 400)
+
+    def test_creator_payload_carries_the_timeline_for_the_setup_page(self):
+        with patch("studio.posting.time.time", return_value=datetime(2026, 11, 20, 8).timestamp()):
+            posting.enqueue(self.job, self.job["clips"][0], ["youtube"])
+        response = self.client.get("/api/creators")
+        self.assertEqual(response.status_code, 200, response.text)
+        row = next(c for c in response.json() if c["id"] == self.job["creator"])
+        self.assertEqual([p["title"] for p in row["timeline"]], ["one"])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

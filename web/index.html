@@ -250,6 +250,24 @@ label.ck input{accent-color:var(--brand);margin:0}
 .range-head{display:flex;flex-direction:column;gap:2px;margin-bottom:10px}
 .range-head b{font-size:13px;color:var(--text)}
 .time-list:empty{display:none}
+.tl-track+.tl-track{margin-top:20px}
+.tl-list{display:flex;flex-direction:column;gap:8px}
+.tl-row{display:flex;align-items:center;gap:12px;padding:8px 10px;border:1px solid var(--line);border-radius:var(--r);background:#fff}
+.tl-row:hover{border-color:var(--line-2);background:var(--muted)}
+.tl-row.dragging{opacity:.55;border-color:var(--brand-line);background:var(--brand-soft)}
+.tl-row.locked{background:var(--brand-soft);border-color:var(--brand-line)}
+.tl-grip{display:flex;flex:none;color:var(--faint);cursor:grab}
+.tl-row.locked .tl-grip{visibility:hidden}
+.tl-thumb{flex:none;width:46px;height:66px;border-radius:8px;overflow:hidden;display:grid;place-items:center;background:var(--muted);color:var(--faint)}
+.tl-thumb img{display:block;width:100%;height:100%;object-fit:cover}
+.tl-thumb svg{width:18px;height:18px}
+.tl-meta{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.tl-meta b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:600;color:var(--text)}
+.tl-meta span{font-size:12px;color:var(--dim)}
+.tl-moves{flex:none;display:flex;gap:4px}
+.tl-moves .btn:disabled{opacity:.35;cursor:default}
+.tl-empty{padding:32px 20px}
+.tl-empty img{width:44px;height:44px;margin-bottom:8px}
 
 /* ---------- surfaces */
 .card{background:#fff;border:1px solid var(--line);border-radius:var(--r);padding:22px;margin-bottom:16px}
@@ -2212,7 +2230,9 @@ function drawCreatorForm() {
   const A = S.accounts;
   const postIntervals = [5, 10, 15, 30, 45, 60, 90, 120];
   const customPostInterval = !postIntervals.includes(Number(c.post_gap_min));
-  box.innerHTML = `<div class="card"><div class="card-head"><div><h2>${i18n.html("Their stream")}</h2><p class="help">${i18n.html("Where to record from, and whether to start by itself.")}</p></div>${foldBtn("stream")}</div>
+  box.innerHTML = `<div class="card"><div class="card-head"><div><h2>TimeLine Post</h2><p class="help">${i18n.html("The videos still waiting to post, in the order they will go out. Drag a video, or use the arrows, to change the order.")}</p></div></div>
+      <div class="card-body"><div id="ctimeline">${timelineHtml(c)}</div></div></div>
+    <div class="card"><div class="card-head"><div><h2>${i18n.html("Their stream")}</h2><p class="help">${i18n.html("Where to record from, and whether to start by itself.")}</p></div>${foldBtn("stream")}</div>
       <div class="card-body"${cardFolded("stream") ? " hidden" : ""}>
       <div class="chans">${channelRows(c)}</div>
       <div class="fields" style="margin-top:14px"><label class="sw span"><input type="checkbox" data-k="auto_watch" ${c.auto_watch ? "checked" : ""}><span>${i18n.html("Record automatically when they go live")}<small>${i18n.html("Checks straight away, then every two minutes.")}</small></span></label></div></div></div>
@@ -2375,6 +2395,77 @@ async function saveCreator(quiet) {
   try { await send(`/api/creators/${creatorId()}`, creatorForm(), "PUT"); dirty(false); if (!quiet) toast(i18n.t("Saved"), "ok"); await tick(); return true; }
   catch (e) { toast(e.message, "bad"); return false; }
 }
+function timelineRow(p, index, total) {
+  const locked = !!p.immediate;
+  const thumb = p.cover ? `<img src="/media/${esc(p.job)}/${esc(p.cover)}?v=${esc(p.version || 0)}" alt="" loading="lazy">` : ic("scissors");
+  const when = locked ? i18n.t("Posting now") : clock(p.due_at);
+  const score = p.score ? ` · ${i18n.t("Score {0}", p.score)}` : "";
+  return `<article class="tl-row${locked ? " locked" : ""}" data-post="${esc(p.id)}" ${locked ? "" : 'draggable="true"'}>
+    <span class="tl-grip" aria-hidden="true">${ic("menu")}</span>
+    <span class="tl-thumb">${thumb}</span>
+    <div class="tl-meta"><b title="${esc(p.title)}">${esc(p.title)}</b><span>${esc(when)}${esc(score)}</span></div>
+    ${locked ? "" : `<div class="tl-moves">
+      <button type="button" class="btn sm icon ghost" data-act="tlmove" data-id="${esc(p.id)}" data-dir="-1" ${index === 0 ? "disabled" : ""} title="${i18n.html("Move earlier")}" aria-label="${i18n.html("Move earlier")}">${ic("up")}</button>
+      <button type="button" class="btn sm icon ghost" data-act="tlmove" data-id="${esc(p.id)}" data-dir="1" ${index === total - 1 ? "disabled" : ""} title="${i18n.html("Move later")}" aria-label="${i18n.html("Move later")}">${ic("down")}</button>
+    </div>`}
+  </article>`;
+}
+function timelineHtml(c) {
+  const posts = (c && c.timeline) || [];
+  if (!posts.length) return `<div class="empty tl-empty"><img src="/brand/favicon.svg" alt=""><b>${i18n.html("No videos waiting to post")}</b>${i18n.html("Clips that are scheduled to go out will appear here, in the order they will post.")}</div>`;
+  const tracks = new Map();
+  for (const p of posts) {
+    if (!tracks.has(p.account)) tracks.set(p.account, {name: p.account_name, list: []});
+    tracks.get(p.account).list.push(p);
+  }
+  return [...tracks.values()].map(track => `
+    <section class="tl-track">
+      <div class="range-head"><b>${esc(track.name)}</b><small class="sub">${i18n.html("Top post goes out first. Drag a video or use the arrows to change the order.")}</small></div>
+      <div class="tl-list">${track.list.map((p, i) => timelineRow(p, i, track.list.length)).join("")}</div>
+    </section>`).join("");
+}
+function drawTimeline() {
+  const box = $("#ctimeline"); if (!box) return;
+  put(box, timelineHtml(creator()));
+}
+let tlDrag = null;
+async function saveTimeline(list) {
+  if (!list) return;
+  const order = $$(".tl-row:not(.locked)", list).map(r => r.dataset.post);
+  try {
+    const got = await send(`/api/creators/${creatorId()}/timeline`, {order});
+    const c = creator(); if (c) c.timeline = got.timeline || [];
+    S.syncV = "";
+    drawTimeline();
+    toast(i18n.t("Posting order saved"), "ok");
+  } catch (e) { toast(e.message, "bad"); drawTimeline(); }
+}
+document.addEventListener("dragstart", e => {
+  const row = e.target.closest?.(".tl-row");
+  if (!row || row.classList.contains("locked")) return;
+  tlDrag = row; row.classList.add("dragging");
+  e.dataTransfer.effectAllowed = "move";
+  try { e.dataTransfer.setData("text/plain", row.dataset.post); } catch {}
+});
+document.addEventListener("dragover", e => {
+  const row = e.target.closest?.(".tl-row");
+  if (!tlDrag || !row || row.parentElement !== tlDrag.parentElement) return;
+  e.preventDefault();
+  if (row === tlDrag) return;
+  const after = e.clientY > row.getBoundingClientRect().top + row.getBoundingClientRect().height / 2;
+  row.parentElement.insertBefore(tlDrag, after ? row.nextElementSibling : row);
+});
+document.addEventListener("drop", async e => {
+  const list = e.target.closest?.(".tl-list");
+  if (!tlDrag || !list) return;
+  e.preventDefault();
+  tlDrag.classList.remove("dragging");
+  const dragged = tlDrag; tlDrag = null;
+  if (list.contains(dragged)) await saveTimeline(list);
+});
+document.addEventListener("dragend", () => {
+  if (tlDrag) { tlDrag.classList.remove("dragging"); tlDrag = null; }
+});
 function drawLog() {
   const c = creator();
   put($("#clog"), c && c.log.length ? `<div class="card"><div class="log">${c.log.map(l => `<div><time>${when(l.t)}</time><span>${esc(l.msg)}</span></div>`).join("")}</div></div>`
@@ -3253,6 +3344,7 @@ function render() {
   drawShell(); drawJobs(); drawStream(); drawSelBar();
   if (S.view === "overview") drawOverview();
   if ($("#clog")) drawLog();
+  if ($("#ctimeline")) drawTimeline();
   if (S.view === "editor") drawEditorPage();
   else if (D.jid) drawClipEditor(false);
 }
@@ -3776,6 +3868,14 @@ document.addEventListener("click", async e => {
       const label = i18n.t(wasOpen ? "Show this section" : "Hide this section");
       b.title = label; b.setAttribute("aria-label", label);
       return;
+    }
+    if (a === "tlmove") {
+      const row = b.closest(".tl-row"), list = row?.parentElement;
+      if (!row || !list) return;
+      const sibling = d.dir === "-1" ? row.previousElementSibling : row.nextElementSibling;
+      if (!sibling) return;
+      if (d.dir === "-1") list.insertBefore(row, sibling); else list.insertBefore(sibling, row);
+      return void await saveTimeline(list);
     }
     if (a === "addrange") {
       $("#posting-range-rows").insertAdjacentHTML("beforeend", postingRangeRows({post_windows: [{start: "12:00", end: "14:00"}]}));
