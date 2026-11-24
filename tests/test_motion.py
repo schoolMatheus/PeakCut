@@ -1,6 +1,7 @@
 """YouTube motions share a safe timeline with their quiet sound effects."""
 import os
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -57,9 +58,36 @@ class MotionTests(unittest.TestCase):
                 _, _, hook_y, cap_y = render.geometry(width, height, layout)
                 m = interactions.plan(["like"], 8, hook_y, cap_y, "en")[0]
                 center = m["y"] + interactions.HEIGHT / 2
-                self.assertGreaterEqual(abs(center - cap_y), 260)
+                self.assertGreaterEqual(m["y"], m.get("caption_y", cap_y) + 124)
+                self.assertGreaterEqual(m["y"], 1600)
                 self.assertGreaterEqual(abs(center - hook_y), 300)
-                self.assertTrue(0 <= m["y"] < m["y"] + interactions.HEIGHT <= 1920)
+                self.assertTrue(0 <= m["y"] < m["y"] + interactions.HEIGHT <= 1880)
+
+    def test_motion_and_sound_are_one_and_a_half_times_faster(self):
+        m = interactions.plan(["like"], 8, 300, 1380, "pt-BR")[0]
+        self.assertAlmostEqual(m["start"], 2.)
+        self.assertAlmostEqual(m["end"] - m["start"], 4 / 1.5)
+        self.assertAlmostEqual(m["rate"], 1 / 1.5)
+        click = m["sounds"][-1]
+        self.assertAlmostEqual(click["start"], 2 + 1.6 / 1.5)
+        self.assertEqual(click["gain"], .6)
+
+    def test_low_captions_reserve_space_only_when_a_motion_is_selected(self):
+        positions = []
+        for actions in ([], ["like"]):
+            with patch.object(render, "_render_in", return_value={}) as encode:
+                render.render_clip(Path(TEMP.name) / "unused.mp4", Path(TEMP.name) / "caption-check", "test",
+                                   {"start": 0., "end": 8., "layout": "zoom", "style": "hype", "interactions": actions},
+                                   [{"w": "caption", "s": 1., "e": 2.}], 1920, 1080)
+            ass = encode.call_args.args[8]
+            events = [line for line in ass.splitlines() if line.startswith("Dialogue:") and ",Cap," in line]
+            y = max(float(re.search(r"\\pos\([^,]+,([^\)]+)\)", line)[1]) for line in events)
+            positions.append(y)
+            if actions:
+                motion = encode.call_args.kwargs["motions"][0]
+                self.assertLessEqual(y + 100, motion["y"] - 24)
+        self.assertGreater(positions[0], 1600)
+        self.assertLess(positions[1], 1520)
 
 
 class MotionRenderTests(unittest.TestCase):
@@ -86,8 +114,8 @@ class MotionRenderTests(unittest.TestCase):
                                         "-frames:v", "1", "-pix_fmt", "rgb24", "-f", "rawvideo", "pipe:1"])
         return np.frombuffer(data, dtype=np.uint8).reshape(1920, 1080, 3)
 
-    def audio(self, source):
-        data = subprocess.check_output(["ffmpeg", "-v", "error", "-i", str(source), "-ar", "48000", "-ac", "2",
+    def audio(self, source, filters=None):
+        data = subprocess.check_output(["ffmpeg", "-v", "error", "-i", str(source), *(["-af", filters] if filters else []), "-ar", "48000", "-ac", "2",
                                         "-f", "f32le", "pipe:1"])
         return np.frombuffer(data, dtype="<f4").reshape(-1, 2)
 
@@ -106,12 +134,13 @@ class MotionRenderTests(unittest.TestCase):
     def test_woosh_uses_sixty_percent_without_raising_the_source(self):
         video = self.make_clip(["like"], "sound", duration=8.)
         output = self.audio(video)
-        source = self.audio(interactions.ASSETS / "sounds" / interactions.SOUNDS["woosh"])
+        source = self.audio(interactions.ASSETS / "sounds" / interactions.SOUNDS["woosh"],
+                            "aresample=48000,atrim=start=0.32:duration=0.829375,asetpts=PTS-STARTPTS,atempo=1.5")
         start = interactions.plan(["like"], 8, 300, 1380, "pt-BR")[0]["start"]
         offset = round(start * 48000)
-        low, high = 2400, 20000
-        # The supplied woosh has a .32 s lead-in before the part used for the entrance.
-        ratio = np.sqrt(np.mean(output[offset + low:offset + high] ** 2)) / np.sqrt(np.mean(source[15360 + low:15360 + high] ** 2))
+        low, high = 2400, 16000
+        # Compare with the same audible source segment at the requested 1.5x speed.
+        ratio = np.sqrt(np.mean(output[offset + low:offset + high] ** 2)) / np.sqrt(np.mean(source[low:high] ** 2))
         self.assertAlmostEqual(float(ratio), .6, delta=.04)
         self.assertLess(np.max(np.abs(output[:max(1, offset - 1000)])), .003)
         self.assertLessEqual(float(np.max(np.abs(output))), .98)

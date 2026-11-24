@@ -302,10 +302,12 @@ def render_clip(src: Path, out_dir: Path, name: str, clip: dict, words: list, sr
     if layout == "gameplay" and not (face and len(face) == 4):
         layout = "crop"     # no webcam found: the game fills the screen, which is still the right shape
     hook_y = _hook_y(layout, hook_y, face)
-    ass = build_ass(words if clip.get("captions", True) else [], start, end, hook, clip.get("style", "bounce"),
-                    clip.get("highlight_words", []), hook_y, cap_y)
     motions = interactions.plan(clip.get("interactions"), end - start, hook_y, cap_y,
                                 clip.get("caption_language", clip.get("text_language", "en")))
+    if motions:
+        cap_y = motions[0]["caption_y"]
+    ass = build_ass(words if clip.get("captions", True) else [], start, end, hook, clip.get("style", "bounce"),
+                    clip.get("highlight_words", []), hook_y, cap_y)
     # The clip is made in a short work folder and moved into place afterwards. The caption step of ffmpeg cannot
     # open files whose full path is longer than 260 characters on Windows, which a data folder deep inside other
     # folders easily reaches. Inside the work folder every name is short and relative (a drive colon would also

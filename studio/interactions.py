@@ -3,6 +3,7 @@ import shutil
 from pathlib import Path
 
 WIDTH, HEIGHT, DURATION = 800, 240, 4.0
+SPEED = 1.5
 ASSETS = Path(__file__).resolve().parent / "assets" / "interactions"
 SOUNDS = {
     "woosh": "ribhavagrawal-woosh-230554.mp3",
@@ -17,17 +18,20 @@ def plan(actions, duration, hook_y, cap_y, language="en") -> list:
     actions = list(dict.fromkeys(a for a in (actions or []) if isinstance(a, str) and a in ACTIONS))
     if not actions or duration <= .5:
         return []
-    candidates = (cap_y + 260, cap_y - 280, 1620, 700)
-    center = next((y for y in candidates if 160 <= y <= 1620 and abs(y - cap_y) >= 260
-                   and abs(y - hook_y) >= 300), None)
-    if center is None:
+    top = 1920 - 40 - HEIGHT
+    center = top + HEIGHT / 2
+    if abs(center - hook_y) < 300:
         return []
+    # Keep the whole motion in the footer. Low captions reserve 100 pixels for
+    # their growing words plus a 24-pixel gap, rather than moving the art above them.
+    cap_y = min(cap_y, top - 124)
     language = "pt-BR" if language == "pt-BR" else "en"
     slot = (duration - .4) / len(actions)
-    hold = min(DURATION, slot - min(.15, slot * .15))
+    window = min(DURATION, slot - min(.15, slot * .15))
+    hold = window / SPEED
     motions = []
     for i, action in enumerate(actions):
-        start = .2 + i * slot + (slot - hold) / 2
+        start = .2 + i * slot + (slot - window) / 2
         end = start + hold
         rate = hold / DURATION
         # Start at the audible cue, rather than the MP3's leading silence. Use the same
@@ -42,7 +46,7 @@ def plan(actions, duration, hook_y, cap_y, language="en") -> list:
         sounds.append({"name": "click", "start": start + click, "end": min(end, start + click + .498 * rate),
                        "source_start": .15, "source_duration": .498, "rate": rate, "gain": .6})
         motions.append({"action": action, "start": start, "end": end, "rate": rate,
-                        "x": (1080 - WIDTH) / 2, "y": center - HEIGHT / 2,
+                        "x": (1080 - WIDTH) / 2, "y": top, "caption_y": cap_y,
                         "asset": ASSETS / language / f"{action}.webm", "sounds": sounds})
     return motions
 

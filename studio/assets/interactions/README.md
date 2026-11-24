@@ -1,8 +1,10 @@
 # YouTube audience motions
 
-The English and Brazilian Portuguese folders contain editable Lottie JSON and matching 800 × 240 transparent VP9 WebM videos, at 30 fps for four seconds. The videos have no baked-in audio: PeakCut schedules the original sound effects on the same clock as the visible actions.
+The English and Brazilian Portuguese folders contain editable Lottie JSON and matching 800 × 240 transparent VP9 WebM videos, at 30 fps for four seconds. PeakCut plays them at 1.5× speed (four native seconds become about 2.67 seconds), with further compression when a short clip needs it. The videos have no baked-in audio: PeakCut schedules the original sound effects on the same clock as the visible actions.
 
 Artwork: red, white and black YouTube-style controls, vector icons, pointer presses, state confirmations and a typed comment. Created with the [Diffusion Studio Lottie workflow](https://github.com/diffusionstudio/lottie) and rendered with its Skia Skottie engine. The font is PeakCut's existing bundled Poppins ExtraBold.
+
+The complete 240-pixel artwork sits in the footer, from y=1640 to y=1880 in the 1080 × 1920 output. It always stays below the spoken captions. When captions would otherwise occupy that band, only clips with selected motions move their caption anchor up just enough to leave room for the words and a gap. Empty selections keep the original caption position.
 
 ## Rebuilding
 
