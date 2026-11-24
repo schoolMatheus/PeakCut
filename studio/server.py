@@ -694,7 +694,8 @@ def _creator_rows():
         if profiles.needs_refresh(c):
             profiles.refresh(c["id"])
         s = live.active_for(c["id"])
-        out.append({**c, "live_job": s.job["id"] if s else None, "log": creators.read_log(c["id"], 30)})
+        out.append({**c, "live_job": s.job["id"] if s else None, "log": creators.read_log(c["id"], 30),
+                    "timeline": posting.timeline(c["id"])})
     return out
 
 
@@ -1409,6 +1410,19 @@ def edit_creator(cid: str, body: dict = Body(...)):
     if body.get("auto_watch") and c.get("auto_watch") and not s:
         live.check_now(cid)    # if they are live right now, recording starts within seconds
     return c
+
+
+@app.post("/api/creators/{cid}/timeline")
+def reorder_timeline(cid: str, body: dict = Body(...)):
+    """Change the order of the videos still waiting to post, keeping the same posting times."""
+    _throttle("ctimeline:" + ctx.uid(), 60, 600)
+    if not creators.get(cid):
+        raise HTTPException(404, "No such creator")
+    try:
+        moved = posting.reorder(cid, body.get("order"))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"moved": moved, "timeline": posting.timeline(cid)}
 
 
 @app.post("/api/creators/{cid}/live")

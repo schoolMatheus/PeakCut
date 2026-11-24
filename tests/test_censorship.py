@@ -45,8 +45,10 @@ class MatchingTests(unittest.TestCase):
     def test_whole_words_accents_and_punctuation_without_changing_original(self):
         from studio import censorship
         text = "DROGA! Drogaria, palavrão; PALAVRAO."
-        self.assertEqual(censorship.mask_text(text, "droga\npalavrão"), "*****! Drogaria, ********; ********.")
+        self.assertEqual(censorship.mask_text(text, "droga\npalavrão"),
+                         "DR*G@! Drogaria, p@l@vr@*; P@L@VR@*.")
         self.assertEqual(censorship.mask_text(text, ""), text)
+        self.assertEqual(censorship.mask_text("psst", "psst"), "****")
 
     def test_mute_ranges_are_relative_clamped_and_merged(self):
         from studio import censorship
@@ -61,7 +63,7 @@ class MatchingTests(unittest.TestCase):
     def test_accents_work_when_the_transcript_uses_combining_characters(self):
         from studio import censorship
         text = "palavra\u0303o"
-        self.assertEqual(censorship.mask_text(text, "palavrão"), "********")
+        self.assertEqual(censorship.mask_text(text, "palavrão"), "p@l@vr@*")
         self.assertEqual(len(censorship.mute_ranges([{"w": text, "s": .5, "e": .8}], "palavrão", 0, 1)), 1)
 
     def test_list_limits_and_literal_words(self):
@@ -96,7 +98,7 @@ class RenderTests(unittest.TestCase):
                 render.render_clip(Path("unused"), Path(TEMP.name), "test", clip, words, 1920, 1080,
                                    speech_words=original)
                 ass = encode.call_args.args[-1]
-                self.assertEqual("*****!" in ass, masked)
+                self.assertEqual("dr*g@!" in ass.lower(), masked)
                 self.assertEqual(bool(encode.call_args.kwargs.get("mute")), muted)
             render.render_clip(Path("unused"), Path(TEMP.name), "test", dict(clip, captions=False), words,
                                1920, 1080, speech_words=original)
@@ -140,7 +142,7 @@ class RenderTests(unittest.TestCase):
                 for name, segments in (("single", None), ("joined", [(source, 0, 1), (source, 1, 1)])):
                     result = render.render_clip(source, output, name, clip, speech, 180, 320, segments=segments,
                                                 speech_words=speech)
-                    self.assertIn("***", (output / f"{name}.ass").read_text(encoding="utf-8"))
+                    self.assertIn("b@d", (output / f"{name}.ass").read_text(encoding="utf-8"))
                     decoded = subprocess.run(["ffmpeg", "-v", "error", "-i", str(output / result["file"]),
                                               "-ac", "1", "-ar", "16000", "-f", "s16le", "pipe:1"],
                                              capture_output=True, check=True)

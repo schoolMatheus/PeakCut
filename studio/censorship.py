@@ -4,6 +4,8 @@ import unicodedata
 from functools import lru_cache
 
 TOKEN = re.compile(r"[^\W_]+(?:['’\-][^\W_]+)*", re.UNICODE)
+# The vowels of a censored word become these symbols, so the word stays readable.
+LEET = {"a": "@", "e": "3", "i": "1", "o": "*", "u": "#"}
 
 
 def _key(text):
@@ -37,9 +39,16 @@ def _listed(words):
     return frozenset(_key(word) for word in words.splitlines() if word)
 
 
+def _mask_word(word: str) -> str:
+    """Swap the vowels for symbols, keeping the consonants as they were."""
+    masked = "".join(LEET.get(_key(char), char) for char in word)
+    # A word without vowels would stay readable, so hide it fully instead.
+    return masked if masked != word else "*" * len(word)
+
+
 def mask_text(text: str, words: str) -> str:
     listed = _listed(words)
-    return TOKEN.sub(lambda m: "*" * len(m[0]) if _key(m[0]) in listed else m[0],
+    return TOKEN.sub(lambda m: _mask_word(m[0]) if _key(m[0]) in listed else m[0],
                      unicodedata.normalize("NFC", text))
 
 

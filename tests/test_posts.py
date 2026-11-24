@@ -249,6 +249,84 @@ class BatchPosts(unittest.TestCase):
                 self.assertEqual(creators.get(self.job["creator"]), saved)
                 self.assertEqual(ctx.version(), version)
 
+    def test_several_ranges_spread_the_daily_limit_across_them(self):
+        self.window(post_windows=[{"start": "11:00", "end": "13:00"}, {"start": "18:00", "end": "22:00"}],
+                    daily_cap=4)
+        with patch("studio.posting.time.time", return_value=datetime(2026, 11, 20, 8).timestamp()):
+            self.queue_clips(5)
+        expected = [datetime(2026, 11, 20, h, m).timestamp() for h, m in ((11, 0), (12, 30), (19, 0), (20, 30))]
+        expected.append(datetime(2026, 11, 21, 11, 0).timestamp())
+        self.assertEqual([p["due_at"] for p in posting._posts], expected)
+
+    def test_fixed_times_use_each_time_once_a_day(self):
+        self.window(post_fixed_times=["12:00", "18:30"], daily_cap_enabled=False)
+        with patch("studio.posting.time.time", return_value=datetime(2026, 11, 20, 8).timestamp()):
+            self.queue_clips(5)
+        expected = [datetime(2026, 11, 20, 12).timestamp(), datetime(2026, 11, 20, 18, 30).timestamp(),
+                    datetime(2026, 11, 21, 12).timestamp(), datetime(2026, 11, 21, 18, 30).timestamp(),
+                    datetime(2026, 11, 22, 12).timestamp()]
+        self.assertEqual([p["due_at"] for p in posting._posts], expected)
+
+    def test_fixed_times_skip_times_that_have_passed(self):
+        self.window(post_fixed_times=["12:00", "18:30"])
+        with patch("studio.posting.time.time", return_value=datetime(2026, 11, 20, 13).timestamp()):
+            self.queue_clips(1)
+        self.assertEqual(posting._posts[0]["due_at"], datetime(2026, 11, 20, 18, 30).timestamp())
+
+    def test_overdue_fixed_time_waits_for_the_next_one(self):
+        self.window(post_fixed_times=["12:00", "18:30"])
+        with patch("studio.posting.time.time", return_value=datetime(2026, 11, 20, 8).timestamp()):
+            self.queue_clips(1)
+        with patch("studio.posting.time.time", return_value=datetime(2026, 11, 20, 13).timestamp()):
+            posting._run_due()
+        self.assertEqual(posting._posts[0]["status"], "scheduled")
+        self.assertEqual(posting._posts[0]["due_at"], datetime(2026, 11, 20, 18, 30).timestamp())
+
+    def test_fixed_time_still_goes_out_a_little_late(self):
+        self.window(post_fixed_times=["12:00"])
+        with patch("studio.posting.time.time", return_value=datetime(2026, 11, 20, 8).timestamp()):
+            self.queue_clips(1)
+        with patch.object(accounts, "youtube_upload", return_value=("remote", "https://example.com/video")), \
+             patch("studio.posting.time.time", return_value=datetime(2026, 11, 20, 12, 20).timestamp()):
+            posting._run_due()
+        self.assertEqual(posting._posts[0]["status"], "posted")
+
+    def test_ranges_and_fixed_times_are_validated_and_saved(self):
+        endpoint = f"/api/creators/{self.job['creator']}"
+        headers = {"Origin": "http://localhost"}
+        valid = {"post_window_enabled": True,
+                 "post_windows": [{"start": "18:00", "end": "22:00"}, {"start": "11:00", "end": "13:00"}],
+                 "post_fixed_times": ["18:30", "12:00", "12:00"]}
+        response = self.client.put(endpoint, json=valid, headers=headers)
+        self.assertEqual(response.status_code, 200, response.text)
+        creators.forget(self.owner.id)
+        saved = creators.get(self.job["creator"])
+        self.assertEqual(saved["post_windows"], [{"start": "11:00", "end": "13:00"},
+                                                 {"start": "18:00", "end": "22:00"}])
+        self.assertEqual(saved["post_fixed_times"], ["12:00", "18:30"])
+        self.assertEqual((saved["post_start_time"], saved["post_end_time"]), ("11:00", "13:00"))
+        for invalid in ({"post_windows": "11:00-13:00"},
+                        {"post_windows": [{"start": "11:00"}]},
+                        {"post_windows": [{"start": "13:00", "end": "11:00"}]},
+                        {"post_windows": [{"start": "25:00", "end": "26:00"}]},
+                        {"post_windows": [{"start": "11:00", "end": "12:00"}] * 9},
+                        {"post_fixed_times": "12:00"},
+                        {"post_fixed_times": ["9:00"]},
+                        {"post_fixed_times": ["12:00"] * 25}):
+            with self.subTest(invalid=invalid):
+                version = ctx.version()
+                response = self.client.put(endpoint, json=invalid, headers=headers)
+                self.assertEqual(response.status_code, 400, response.text)
+                self.assertEqual(creators.get(self.job["creator"]), saved)
+                self.assertEqual(ctx.version(), version)
+
+    def test_overlapping_ranges_are_merged(self):
+        c = creators.update(self.job["creator"], {
+            "post_window_enabled": True,
+            "post_windows": [{"start": "18:00", "end": "22:00"}, {"start": "11:00", "end": "13:00"},
+                             {"start": "12:00", "end": "19:00"}]})
+        self.assertEqual(c["post_windows"], [{"start": "11:00", "end": "22:00"}])
+
     def test_changing_window_reschedules_waiting_posts_and_updates_sync(self):
         now = datetime(2026, 11, 20, 8).timestamp()
         with patch("studio.posting.time.time", return_value=now):
@@ -346,6 +424,64 @@ class BatchPosts(unittest.TestCase):
         self.assertEqual(self.post(clips=self.pairs[:1]).status_code, 200)
         response = self.post()
         self.assertEqual(response.json(), {"queued": 1, "clips": 1, "skipped": 1})
+
+    def reorder(self, order):
+        return self.client.post(f"/api/creators/{self.job['creator']}/timeline", json={"order": order},
+                                headers={"Origin": "http://localhost"})
+
+    def test_timeline_lists_waiting_posts_and_reordering_swaps_their_times(self):
+        with patch("studio.posting.time.time", return_value=datetime(2026, 11, 20, 8).timestamp()):
+            posting.enqueue(self.job, self.job["clips"][0], ["youtube"])
+            posting.enqueue(self.job, self.job["clips"][1], ["youtube"])
+        rows = posting.timeline(self.job["creator"])
+        self.assertEqual([r["title"] for r in rows], ["one", "two"])
+        slots = [r["due_at"] for r in rows]
+        version = ctx.version()
+        response = self.reorder([rows[1]["id"], rows[0]["id"]])
+        self.assertEqual(response.status_code, 200, response.text)
+        after = response.json()["timeline"]
+        self.assertEqual([r["title"] for r in after], ["two", "one"])
+        self.assertEqual(sorted(r["due_at"] for r in after), slots)   # the same posting times, swapped
+        self.assertGreater(ctx.version(), version)
+
+    def test_reordering_one_account_leaves_the_other_accounts_times_alone(self):
+        with patch("studio.posting.time.time", return_value=datetime(2026, 11, 20, 8).timestamp()):
+            posting.enqueue(self.job, self.job["clips"][0], ["youtube", "instagram"])
+            posting.enqueue(self.job, self.job["clips"][1], ["youtube"])
+        youtube = [r for r in posting.timeline(self.job["creator"]) if r["account"] == "youtube"]
+        instagram = {r["id"]: r["due_at"] for r in posting.timeline(self.job["creator"]) if r["account"] == "instagram"}
+        self.assertEqual(self.reorder([youtube[1]["id"], youtube[0]["id"]]).status_code, 200)
+        after = posting.timeline(self.job["creator"])
+        self.assertEqual([r["title"] for r in after if r["account"] == "youtube"], ["two", "one"])
+        self.assertEqual({r["id"]: r["due_at"] for r in after if r["account"] == "instagram"}, instagram)
+
+    def test_reorder_refuses_unknown_finished_or_invented_posts(self):
+        with patch("studio.posting.time.time", return_value=datetime(2026, 11, 20, 8).timestamp()):
+            posting.enqueue(self.job, self.job["clips"][0], ["youtube"])
+            posting.enqueue(self.job, self.job["clips"][1], ["youtube"])
+        rows = posting.timeline(self.job["creator"])
+        saved = [(p["id"], p["due_at"]) for p in posting._posts]
+        for order, expected in (([rows[0]["id"], "nope"], 400),
+                                ([rows[0]["id"], rows[0]["id"]], 400),
+                                ("not-a-list", 400),
+                                ([rows[0]["id"] + "x"], 400)):
+            with self.subTest(order=order):
+                response = self.reorder(order)
+                self.assertEqual(response.status_code, expected, response.text)
+                self.assertEqual([(p["id"], p["due_at"]) for p in posting._posts], saved)
+        response = self.client.post("/api/creators/missing/timeline", json={"order": []},
+                                    headers={"Origin": "http://localhost"})
+        self.assertEqual(response.status_code, 404)
+        posting.cancel(rows[0]["id"])
+        self.assertEqual(self.reorder([rows[0]["id"]]).status_code, 400)
+
+    def test_creator_payload_carries_the_timeline_for_the_setup_page(self):
+        with patch("studio.posting.time.time", return_value=datetime(2026, 11, 20, 8).timestamp()):
+            posting.enqueue(self.job, self.job["clips"][0], ["youtube"])
+        response = self.client.get("/api/creators")
+        self.assertEqual(response.status_code, 200, response.text)
+        row = next(c for c in response.json() if c["id"] == self.job["creator"])
+        self.assertEqual([p["title"] for p in row["timeline"]], ["one"])
 
 
 if __name__ == "__main__":
