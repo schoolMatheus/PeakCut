@@ -2230,8 +2230,8 @@ function drawCreatorForm() {
   const A = S.accounts;
   const postIntervals = [5, 10, 15, 30, 45, 60, 90, 120];
   const customPostInterval = !postIntervals.includes(Number(c.post_gap_min));
-  box.innerHTML = `<div class="card"><div class="card-head"><div><h2>TimeLine Post</h2><p class="help">${i18n.html("The videos still waiting to post, in the order they will go out. Drag a video, or use the arrows, to change the order.")}</p></div></div>
-      <div class="card-body"><div id="ctimeline">${timelineHtml(c)}</div></div></div>
+  box.innerHTML = `<div class="card"><div class="card-head"><div><h2>TimeLine Post</h2><p class="help">${i18n.html("The videos still waiting to post, in the order they will go out. Drag a video, or use the arrows, to change the order.")}</p></div>${foldBtn("timeline")}</div>
+      <div class="card-body"${cardFolded("timeline") ? " hidden" : ""}><div id="ctimeline">${timelineHtml(c)}</div></div></div>
     <div class="card"><div class="card-head"><div><h2>${i18n.html("Their stream")}</h2><p class="help">${i18n.html("Where to record from, and whether to start by itself.")}</p></div>${foldBtn("stream")}</div>
       <div class="card-body"${cardFolded("stream") ? " hidden" : ""}>
       <div class="chans">${channelRows(c)}</div>
