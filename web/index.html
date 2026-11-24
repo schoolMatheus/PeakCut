@@ -220,6 +220,13 @@ input:not([type=checkbox],[type=radio],[type=range]):focus-visible,select:focus-
 input::placeholder,textarea::placeholder{color:var(--faint)}
 textarea{height:auto;padding:10px 12px;resize:vertical}
 label.f{display:flex;flex-direction:column;gap:7px;font-size:12px;color:var(--dim);font-weight:600}
+.f-label{display:flex;align-items:center;gap:6px}
+.tip{position:relative;display:inline-flex;align-items:center}
+.infobtn{width:18px;height:18px;padding:0;border-radius:50%;border:1px solid var(--line-2);background:#fff;color:var(--dim);font:italic 700 11px/1 Georgia,serif;cursor:help;display:inline-flex;align-items:center;justify-content:center;flex:none}
+.infobtn:hover,.infobtn:focus-visible{color:var(--brand-ink);border-color:var(--brand-line);outline:none}
+.tip .tip-body{display:none;position:absolute;left:0;top:calc(100% + 6px);z-index:30;width:250px;max-width:70vw;max-height:60vh;overflow:auto;padding:8px 10px;border:1px solid var(--line-2);border-radius:var(--r-sm);background:#fff;color:var(--dim);font-size:12px;font-weight:400;line-height:1.4;text-align:left;white-space:normal}
+.tip .tip-body.hint{margin:0}
+.tip:hover .tip-body,.tip:focus-within .tip-body{display:block}
 label.sw{display:flex;align-items:center;gap:12px;cursor:pointer;color:var(--text);font-weight:600}
 label.sw input{appearance:none;width:38px;height:22px;border-radius:999px;background:#DCD2D0;position:relative;cursor:pointer;flex:none;margin:0}
 label.sw input::after{content:"";position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:#fff;transition:transform .15s}
@@ -2212,13 +2219,13 @@ function drawCreatorForm() {
     <div class="card"><div class="card-head"><div><h2>${i18n.html("How the AI decides")}</h2><p class="help">${i18n.html("Two separate AI checks. The words judge reads only what was said. The reaction judge sees only how loud the streamer got and how busy chat was, never the words.")}</p></div>${foldBtn("ai")}</div>
       <div class="card-body"${cardFolded("ai") ? " hidden" : ""}>
       <div class="fields">
-        <label class="f">${i18n.html("Check the live stream every")}<select data-k="ai_every_min">${opts({1:i18n.t("1 minute"), 2:i18n.t("2 minutes"), 3:i18n.t("3 minutes"), 5:i18n.t("5 minutes"), 10:i18n.t("10 minutes")}, c.ai_every_min || 3)}</select><small class="sub" id="costhint" style="font-weight:400">${costHint(c.ai_every_min)}</small></label>
+        <label class="f">${i18n.html("Check every")}<select data-k="ai_every_min">${opts({1:i18n.t("1 minute"), 2:i18n.t("2 minutes"), 3:i18n.t("3 minutes"), 5:i18n.t("5 minutes"), 10:i18n.t("10 minutes")}, c.ai_every_min || 3)}</select><small class="sub" id="costhint" style="font-weight:400">${costHint(c.ai_every_min)}</small></label>
         <p class="help span" style="margin:0">${i18n.html("On top of that, the AI always looks straight away when the stream suddenly gets louder or chat gets busier, and when someone says \"clip\" or \"clip it\".")}</p>
-        <label class="f">${i18n.html("Most live clips per hour")}<input data-k="live_per_hour" type="number" min="1" max="60" value="${c.live_per_hour}"></label>
+        <label class="f">${i18n.html("Live clips per hour")}<input data-k="live_per_hour" type="number" min="1" max="60" value="${c.live_per_hour}"></label>
         <label class="f">${i18n.html("Make a clip when")}<select data-k="decide_mode">${opts({both:i18n.t("Both judges say yes"), either:i18n.t("Both say yes, or the words judge is very sure (90+)")}, c.decide_mode)}</select></label>
-        <label class="f">${i18n.html("Words judge must score at least")}<input data-k="min_score" type="number" min="0" max="100" value="${c.min_score}"></label>
-        <label class="f">${i18n.html("Make sure there's a live clip at least every")}<select data-k="must_clip_min">${opts({0:i18n.t("Off"), 15:i18n.t("15 minutes"), 30:i18n.t("30 minutes"), 60:i18n.t("1 hour"), 120:i18n.t("2 hours")}, c.must_clip_min)}</select></label>
-        <label class="f">${i18n.html("Minimum gap between live clips (minutes)")}<input data-k="min_gap_min" type="number" min="0" max="60" value="${c.min_gap_min}"></label>
+        <label class="f">${i18n.html("Must score at least")}<input data-k="min_score" type="number" min="0" max="100" value="${c.min_score}"></label>
+        <label class="f">${i18n.html("At least one clip every")}<select data-k="must_clip_min">${opts({0:i18n.t("Off"), 15:i18n.t("15 minutes"), 30:i18n.t("30 minutes"), 60:i18n.t("1 hour"), 120:i18n.t("2 hours")}, c.must_clip_min)}</select></label>
+        <label class="f">${i18n.html("Minimum gap (minutes)")}<input data-k="min_gap_min" type="number" min="0" max="60" value="${c.min_gap_min}"></label>
         <label class="f span">${i18n.html("Always clip the last 30 seconds when someone says")}<input data-k="trigger_words" value="${esc(c.trigger_words)}" placeholder="clip that, clip it"><small class="sub" style="font-weight:400">${i18n.html("Separate phrases with commas. Matched on the transcript, so it needs no AI call.")}</small></label>
       </div></div></div>
     <div class="card"><div class="card-head"><div><h2>${i18n.html("Clips")}</h2><p class="help">${i18n.html("How this creator's clips look.")}</p></div>${foldBtn("clips")}</div>
@@ -2233,20 +2240,20 @@ function drawCreatorForm() {
         <label class="f">${i18n.html("Clips per video")}<input data-k="max_clips" type="number" value="${c.max_clips}"></label>
         <label class="f">${i18n.html("Spoken language")}<select data-k="lang">${opts(Object.fromEntries(Object.keys(speechLangs()).map(k => [k, langName(k)])), c.lang || "en")}</select></label>
         <label class="f span">${i18n.html("Big text on every clip")}<input data-k="hook_text" maxlength="60" value="${esc(c.hook_text || "")}" placeholder="${i18n.html("Left empty, the AI writes a different one for each clip")}"></label>
-        <label class="f span">${i18n.html("Description for every clip")}<textarea data-k="description_text" rows="3" maxlength="2000">${esc(c.description_text || "")}</textarea><small>${i18n.html("Written once, used exactly as typed on every clip.")}</small></label>
-        <label class="f">${i18n.html("Minutes of live stream to keep")}<input data-k="buffer_min" type="number" value="${c.buffer_min}"></label></div></div></div>
+        <label class="f span">${i18n.html("Description for every clip")}<textarea data-k="description_text" rows="3" maxlength="2000">${esc(c.description_text || "")}</textarea><small class="sub">${i18n.html("Written once, used exactly as typed on every clip.")}</small></label>
+        <label class="f">${i18n.html("Minutes to keep")}<input data-k="buffer_min" type="number" value="${c.buffer_min}"><small class="sub">${i18n.html("Minutes of live stream to keep")}</small></label></div></div></div>
     <div class="card"><div class="card-head"><div><h2>${i18n.html("Posting")}</h2><p class="help">${A.length ? i18n.t("Choose the accounts this creator's clips go to. One account can be shared by several creators.") : i18n.t("No accounts are connected yet. Connect one in Social networks, then come back.")}</p></div>${foldBtn("posting")}</div>
       <div class="card-body"${cardFolded("posting") ? " hidden" : ""}>
       ${A.length ? `<div class="row" style="margin-bottom:16px">${A.map(a => `<label class="ck"><input type="checkbox" data-acc value="${esc(a.id)}" ${c.accounts.includes(a.id) ? "checked" : ""}>${esc(a.label)} · ${esc(a.name)}</label>`).join("")}</div>` : `<button class="btn" data-act="go" data-v="social" style="margin-bottom:16px">${ic("plug")}${i18n.html("Open Social networks")}</button>`}
       <div class="fields"><label class="sw span"><input type="checkbox" data-k="autopost" ${c.autopost ? "checked" : ""}><span>${i18n.html("Post new clips automatically")}<small>${i18n.html("Clips that score high enough go out without you approving them.")}</small></span></label>
-        <label class="f">${i18n.html("Only auto-post clips scoring at least")}<input data-k="post_min_score" type="number" min="0" max="100" value="${c.post_min_score}"></label>
+        <label class="f" id="post-min-score-field" ${c.autopost ? "" : "hidden"}>${i18n.html("Minimum score for auto-posting")}<input data-k="post_min_score" type="number" min="0" max="100" value="${c.post_min_score}" ${c.autopost ? "" : "disabled"}></label>
         <label class="f" id="post-interval-field">${i18n.html("Posting interval")}<select id="post-interval">
           ${postIntervals.map(minutes => `<option value="${minutes}" ${Number(c.post_gap_min) === minutes ? "selected" : ""}>${i18n.html("Every {0} min", minutes)}</option>`).join("")}
           <option value="custom" ${customPostInterval ? "selected" : ""}>${i18n.html("Custom")}</option>
         </select><small class="sub" style="font-weight:400">${i18n.html("New posts follow the last scheduled video on each account, using this interval.")}</small></label>
         <label class="f" id="custom-post-interval" ${customPostInterval ? "" : "hidden"}>${i18n.html("Custom interval (minutes)")}<input data-k="post_gap_min" type="number" min="5" max="1440" step="1" required value="${c.post_gap_min}"><small class="sub" style="font-weight:400">${i18n.html("Enter a whole number from 5 to 1,440 minutes.")}</small></label>
         <label class="sw span"><input type="checkbox" data-k="daily_cap_enabled" ${c.daily_cap_enabled ? "checked" : ""}><span>${i18n.html("Limit posts per account per day")}<small>${i18n.html("Off by default. Turn on to set a daily limit.")}</small></span></label>
-        <label class="f" id="daily-post-limit" ${c.daily_cap_enabled ? "" : "hidden"}>${i18n.html("Most posts per account per day")}<input data-k="daily_cap" type="number" min="1" max="50" step="1" required value="${c.daily_cap}" ${c.daily_cap_enabled ? "" : "disabled"}></label>
+        <label class="f" id="daily-post-limit" ${c.daily_cap_enabled ? "" : "hidden"}>${i18n.html("Most posts per day")}<input data-k="daily_cap" type="number" min="1" max="50" step="1" required value="${c.daily_cap}" ${c.daily_cap_enabled ? "" : "disabled"}></label>
         <label class="sw span"><input type="checkbox" data-k="post_window_enabled" ${c.post_window_enabled ? "checked" : ""}><span>${i18n.html("Set daily posting hours")}<small>${i18n.html("With a daily limit, posts are spread evenly across these ranges. Extra clips wait for the next day.")}</small></span></label>
         <div class="fields span" id="posting-window" ${c.post_window_enabled ? "" : "hidden"}>
           <div class="span" id="posting-ranges">
@@ -2262,12 +2269,20 @@ function drawCreatorForm() {
           <p class="help span" id="posting-window-help">${i18n.html("Time zone of the computer running PeakCut: {0}.", esc(S.status.posting_timezone || ""))} ${i18n.html("Each range must end later than it starts on the same day. Saving updates posts already in the queue.")}</p>
           <p class="help span" id="posting-window-preview" role="status" aria-live="polite"></p>
         </div>
-        <label class="f">${i18n.html("Who can see posts (YouTube, TikTok)")}<select data-k="privacy">${opts({public:i18n.t("Public"), unlisted:i18n.t("Unlisted"), private:i18n.t("Private")}, c.privacy)}</select></label>
-        <label class="f">${i18n.html("Campaign pay per 1,000 views ($)")}<input data-k="rate_per_1k" type="number" step="0.1" min="0" value="${c.rate_per_1k}"></label>
+        <label class="f">${i18n.html("Who can see (YouTube, TikTok)")}<select data-k="privacy">${opts({public:i18n.t("Public"), unlisted:i18n.t("Unlisted"), private:i18n.t("Private")}, c.privacy)}</select></label>
+        <label class="f">${i18n.html("CPM")}<input data-k="rate_per_1k" type="number" step="0.1" min="0" value="${c.rate_per_1k}"><small class="sub">${i18n.html("Campaign pay per 1,000 views ($)")}</small></label>
         <label class="f span">${i18n.html("Line added to every post (credit, campaign tag)")}<input data-k="post_footer" value="${esc(c.post_footer)}" placeholder="Clipped from @streamer"></label></div></div></div>
     <div class="card danger-card"><h2>${i18n.html("Delete this creator")}</h2><p class="help">${i18n.html("Removes {0}, their settings and every video and clip filed under them. This cannot be undone.", esc(c.name))}</p>
       <button class="btn danger" data-act="delcreator">${ic("trash")}${i18n.html("Delete creator")}</button></div>
     <div class="savebar" id="savebar"><span>${ic("warn")}${i18n.html("You have unsaved changes")}</span><button class="btn ghost" data-act="cdiscard">${i18n.html("Discard")}</button><button class="btn primary" data-act="csave">${ic("check")}${i18n.html("Save changes")}</button></div>`;
+  updatePostingWindow();
+  updateAutoPost();
+}
+function updateAutoPost() {
+  const toggle = $("#cform [data-k='autopost']"); if (!toggle) return;
+  const field = $("#post-min-score-field"), input = field?.querySelector("input");
+  if (field) field.hidden = !toggle.checked;
+  if (input) input.disabled = !toggle.checked;
   updatePostingWindow();
 }
 function postingRangeRows(c) {
@@ -2281,6 +2296,7 @@ function updatePostingWindow() {
   const field = $("#posting-window"); if (!field) return;
   const enabled = $("#cform [data-k='post_window_enabled']").checked;
   const limited = $("#cform [data-k='daily_cap_enabled']").checked;
+  const autopost = $("#cform [data-k='autopost']")?.checked;
   const auto = enabled && limited;
   field.hidden = !enabled;
   field.querySelectorAll("input").forEach(i => { i.disabled = !enabled; });
@@ -2292,10 +2308,10 @@ function updatePostingWindow() {
     e.setCustomValidity(bad ? i18n.t("The posting end time must be later than the start time on the same day.") : "");
     if (bad) valid = false;
   });
-  $("#post-interval-field").hidden = auto;
-  $("#post-interval").disabled = auto;
-  $("#custom-post-interval").hidden = auto || $("#post-interval").value !== "custom";
-  $("#custom-post-interval input").disabled = auto;
+  $("#post-interval-field").hidden = !autopost || auto;
+  $("#post-interval").disabled = !autopost || auto;
+  $("#custom-post-interval").hidden = !autopost || auto || $("#post-interval").value !== "custom";
+  $("#custom-post-interval input").disabled = !autopost || auto;
   const capInput = $("#cform [data-k='daily_cap']");
   $("#daily-post-limit").hidden = !limited;
   capInput.disabled = !limited;
@@ -3390,11 +3406,12 @@ document.addEventListener("change", async e => {
     updatePostingWindow();
     dirty(true);
   }
+  if (t.closest("#cform") && t.dataset.k === "autopost") { updateAutoPost(); dirty(true); }
   if (t.dataset.k === "ai_every_min" && $("#costhint")) $("#costhint").textContent = costHint(Number(t.value));
   if (t.name === "mainch") return;  // saved by its own click handler
   if (t.closest("#cform") && t.type === "radio") { $$("#cform .plan").forEach(l => l.classList.toggle("on", l.contains(t))); return saveCreator(true); }
   if (!t.closest("#cform") || t.type !== "checkbox") return;
-  if (t.dataset.k === "autopost" && t.checked && !await ask(i18n.t("Turn on auto-posting?"), i18n.t("Clips that score high enough will be posted to the ticked accounts without you seeing them first."), i18n.t("Turn on"))) { t.checked = false; return; }
+  if (t.dataset.k === "autopost" && t.checked && !await ask(i18n.t("Turn on auto-posting?"), i18n.t("Clips that score high enough will be posted to the ticked accounts without you seeing them first."), i18n.t("Turn on"))) { t.checked = false; updateAutoPost(); return; }
   saveCreator(true);
 });
 
@@ -3863,6 +3880,39 @@ document.addEventListener("click", async e => {
   } catch (err) { b.disabled = false; toast(err.message, "bad"); }
 });
 
+/* Field explanations live behind a small "i" beside the label, so every form across the app stays tidy. */
+let fieldHintSeq = 0, fieldHintFrame = 0;
+function decorateFieldHints() {
+  for (const label of $$("label.f:not([data-tipped])")) {
+    const hint = [...label.children].find(el => el.matches(".hint, small.sub"));
+    if (!hint || !hint.textContent.trim()) continue;
+    label.dataset.tipped = "1";
+    let title = label.querySelector(":scope > .f-label");
+    if (!title) {
+      title = document.createElement("span");
+      title.className = "f-label";
+      while (label.firstChild && (label.firstChild.nodeType === 3 || (label.firstChild.nodeType === 1 && label.firstChild.matches("small, .opt")))) title.append(label.firstChild);
+      label.prepend(title);
+    }
+    if (!hint.id) hint.id = `field-hint-${++fieldHintSeq}`;
+    hint.classList.add("tip-body");
+    if (!hint.getAttribute("role")) hint.setAttribute("role", "tooltip");
+    const tip = document.createElement("span"); tip.className = "tip";
+    const btn = document.createElement("button");
+    btn.type = "button"; btn.className = "infobtn"; btn.textContent = "i";
+    btn.setAttribute("aria-describedby", hint.id);
+    btn.title = i18n.t("More about this field");
+    btn.setAttribute("aria-label", i18n.t("More about this field"));
+    tip.append(btn, hint);
+    title.append(tip);
+  }
+}
+function scheduleFieldHints() {
+  if (fieldHintFrame) return;
+  fieldHintFrame = requestAnimationFrame(() => { fieldHintFrame = 0; decorateFieldHints(); });
+}
+new MutationObserver(scheduleFieldHints).observe(document.body, {childList: true, subtree: true});
+decorateFieldHints();
 $("#collapseBtn").innerHTML = ic("sidebar"); $("#menuBtn").innerHTML = ic("menu");
 try { if (localStorage.getItem("mini")) $("#app").classList.add("mini"); } catch {}
 $("#main").addEventListener("scroll", () => $(".topbar").classList.toggle("stuck", $("#main").scrollTop > 4), {passive:true});
