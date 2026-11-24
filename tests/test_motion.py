@@ -58,10 +58,25 @@ class MotionTests(unittest.TestCase):
                 _, _, hook_y, cap_y = render.geometry(width, height, layout)
                 m = interactions.plan(["like"], 8, hook_y, cap_y, "en")[0]
                 center = m["y"] + interactions.HEIGHT / 2
-                self.assertGreaterEqual(m["y"], m.get("caption_y", cap_y) + 124)
-                self.assertGreaterEqual(m["y"], 1600)
+                self.assertEqual(m["y"], m["caption_y"] + 32)
+                self.assertEqual(m["caption_y"], min(cap_y, 1608))
                 self.assertGreaterEqual(abs(center - hook_y), 300)
                 self.assertTrue(0 <= m["y"] < m["y"] + interactions.HEIGHT <= 1880)
+
+    def test_motion_matches_the_supplied_reference_spacing(self):
+        motion = interactions.plan(["subscribe"], 24, 300, 1380, "pt-BR")[0]
+        self.assertEqual(motion["caption_y"], 1380)
+        self.assertEqual(motion["y"], 1412)
+        self.assertEqual(motion["x"], 140)
+        # The art's white body starts 58 pixels inside its transparent canvas.
+        # At the reference's half-size preview, its top is therefore y=735.
+        self.assertEqual((motion["y"] + 58) / 2, 735)
+
+    def test_hype_accents_stay_above_the_comment_exit(self):
+        motion = interactions.plan(["comment"], 8, 300, 1380, "pt-BR", caption_style="hype")[0]
+        # Measured with bundled libass fonts: popped Ç reaches 81 px below its anchor;
+        # the exiting comment's opaque pixels start 28 px inside the asset.
+        self.assertGreaterEqual(motion["y"] + 28, motion["caption_y"] + 81 + 12)
 
     def test_motion_and_sound_are_one_and_a_half_times_faster(self):
         m = interactions.plan(["like"], 8, 300, 1380, "pt-BR")[0]
@@ -85,9 +100,9 @@ class MotionTests(unittest.TestCase):
             positions.append(y)
             if actions:
                 motion = encode.call_args.kwargs["motions"][0]
-                self.assertLessEqual(y + 100, motion["y"] - 24)
+                self.assertLessEqual(y + 60, motion["y"] + 26)
         self.assertGreater(positions[0], 1600)
-        self.assertLess(positions[1], 1520)
+        self.assertAlmostEqual(positions[0] - positions[1], 80)
 
 
 class MotionRenderTests(unittest.TestCase):

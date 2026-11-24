@@ -13,18 +13,21 @@ SOUNDS = {
 ACTIONS = ("subscribe", "like", "comment", "share", "save")
 
 
-def plan(actions, duration, hook_y, cap_y, language="en") -> list:
+def plan(actions, duration, hook_y, cap_y, language="en", *, caption_style="clean") -> list:
     """Image and sound use the same clip-relative clock, including shortened clips."""
     actions = list(dict.fromkeys(a for a in (actions or []) if isinstance(a, str) and a in ACTIONS))
     if not actions or duration <= .5:
         return []
-    top = 1920 - 40 - HEIGHT
+    # Match the supplied reference: the visible body starts just below the words.
+    # The asset has transparent padding above its white body.
+    # Taller styles also need room for their pop, outlines and accents, including
+    # the comment card's short upward exit. Clean retains the reference spacing.
+    gap = {"clean": 32, "bounce": 56, "hype": 80}.get(caption_style, 56)
+    cap_y = min(cap_y, 1920 - 40 - HEIGHT - gap)
+    top = cap_y + gap
     center = top + HEIGHT / 2
     if abs(center - hook_y) < 300:
         return []
-    # Keep the whole motion in the footer. Low captions reserve 100 pixels for
-    # their growing words plus a 24-pixel gap, rather than moving the art above them.
-    cap_y = min(cap_y, top - 124)
     language = "pt-BR" if language == "pt-BR" else "en"
     slot = (duration - .4) / len(actions)
     window = min(DURATION, slot - min(.15, slot * .15))

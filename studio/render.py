@@ -303,7 +303,8 @@ def render_clip(src: Path, out_dir: Path, name: str, clip: dict, words: list, sr
         layout = "crop"     # no webcam found: the game fills the screen, which is still the right shape
     hook_y = _hook_y(layout, hook_y, face)
     motions = interactions.plan(clip.get("interactions"), end - start, hook_y, cap_y,
-                                clip.get("caption_language", clip.get("text_language", "en")))
+                                clip.get("caption_language", clip.get("text_language", "en")),
+                                caption_style=clip.get("style", "bounce"))
     if motions:
         cap_y = motions[0]["caption_y"]
     ass = build_ass(words if clip.get("captions", True) else [], start, end, hook, clip.get("style", "bounce"),
