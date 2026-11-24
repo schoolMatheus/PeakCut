@@ -237,6 +237,12 @@ label.ck input{accent-color:var(--brand);margin:0}
 .interaction-checks input:focus-visible{outline:2px solid var(--brand-deep);outline-offset:3px}
 .fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:18px}
 .span{grid-column:1/-1}
+.time-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 8px}
+.time-row input[type=time]{width:132px}
+.time-row>span{color:var(--dim)}
+.range-head{display:flex;flex-direction:column;gap:2px;margin-bottom:10px}
+.range-head b{font-size:13px;color:var(--text)}
+.time-list:empty{display:none}
 
 /* ---------- surfaces */
 .card{background:#fff;border:1px solid var(--line);border-radius:var(--r);padding:22px;margin-bottom:16px}
@@ -1811,7 +1817,8 @@ document.addEventListener("input", e => { if (e.target.id === "url") onLink(e.ta
   if (e.target.closest?.("#cform") && e.target.dataset.k && !/checkbox|radio/.test(e.target.type)) {
     dirty(true);
     if (["post_start_time", "post_end_time", "daily_cap"].includes(e.target.dataset.k)) updatePostingWindow();
-  } });
+  }
+  if (e.target.closest?.("#posting-window") && e.target.type === "time") { dirty(true); updatePostingWindow(); } });
 document.addEventListener("keydown", e => { if (e.target.id === "url" && e.key === "Enter" && e.target.value.trim() && looksLink(e.target.value.trim())) { e.preventDefault(); clearTimeout(linkTimer); takeLink(att(), e.target.value.trim(), e.target); } });
 document.addEventListener("click", e => {
   const r = e.target.closest("[data-rm]"), A = att(); if (!r || A.busy) return;
@@ -2079,7 +2086,7 @@ function openBatchPost() {
     <p class="help">${i18n.html("Every selected clip will go to the accounts you choose below. Clips already queued or posted to an account are skipped.")}</p>
     ${S.accounts.length ? `<h3>${i18n.html("Choose accounts")}</h3><p class="help" data-posthint role="status"></p>
       <div class="post-accounts">${postAccountChoices(selected, "bpacc")}</div>
-      <p class="help">${i18n.html("Add to queue follows each creator's posting window, interval and daily limit.")}</p>`
+      <p class="help">${i18n.html("Add to queue follows each creator's posting hours, fixed times, interval and daily limit.")}</p>`
       : `<p class="help">${i18n.html("No accounts connected yet. Connect one in Social networks.")}</p><button type="button" class="btn" data-act="batchsocial">${i18n.html("Open Social networks")}</button>`}
     <p class="err" data-batch-error role="alert" hidden></p>
     <div class="dlg-foot"><button class="btn" value="no">${i18n.html("Cancel")}</button>
@@ -2214,11 +2221,19 @@ function drawCreatorForm() {
         <label class="f" id="custom-post-interval" ${customPostInterval ? "" : "hidden"}>${i18n.html("Custom interval (minutes)")}<input data-k="post_gap_min" type="number" min="5" max="1440" step="1" required value="${c.post_gap_min}"><small class="sub" style="font-weight:400">${i18n.html("Enter a whole number from 5 to 1,440 minutes.")}</small></label>
         <label class="sw span"><input type="checkbox" data-k="daily_cap_enabled" ${c.daily_cap_enabled ? "checked" : ""}><span>${i18n.html("Limit posts per account per day")}<small>${i18n.html("Off by default. Turn on to set a daily limit.")}</small></span></label>
         <label class="f" id="daily-post-limit" ${c.daily_cap_enabled ? "" : "hidden"}>${i18n.html("Most posts per account per day")}<input data-k="daily_cap" type="number" min="1" max="50" step="1" required value="${c.daily_cap}" ${c.daily_cap_enabled ? "" : "disabled"}></label>
-        <label class="sw span"><input type="checkbox" data-k="post_window_enabled" ${c.post_window_enabled ? "checked" : ""}><span>${i18n.html("Set daily posting hours")}<small>${i18n.html("With a daily limit, posts are spread evenly between these times. Extra clips wait for the next day.")}</small></span></label>
+        <label class="sw span"><input type="checkbox" data-k="post_window_enabled" ${c.post_window_enabled ? "checked" : ""}><span>${i18n.html("Set daily posting hours")}<small>${i18n.html("With a daily limit, posts are spread evenly across these ranges. Extra clips wait for the next day.")}</small></span></label>
         <div class="fields span" id="posting-window" ${c.post_window_enabled ? "" : "hidden"}>
-          <label class="f">${i18n.html("Start posting at")}<input data-k="post_start_time" type="time" step="60" required value="${esc(c.post_start_time || "09:00")}" aria-describedby="posting-window-help"></label>
-          <label class="f">${i18n.html("Stop posting at")}<input data-k="post_end_time" type="time" step="60" required value="${esc(c.post_end_time || "21:00")}" aria-describedby="posting-window-help"></label>
-          <p class="help span" id="posting-window-help">${i18n.html("Time zone of the computer running PeakCut: {0}.", esc(S.status.posting_timezone || ""))} ${i18n.html("The end time must be later than the start time on the same day. Saving updates posts already in the queue.")}</p>
+          <div class="span" id="posting-ranges">
+            <div class="range-head"><b>${i18n.html("Time ranges")}</b><small class="sub">${i18n.html("Add one range for each part of the day. Posts are spread inside these ranges.")}</small></div>
+            <div class="time-list" id="posting-range-rows">${postingRangeRows(c)}</div>
+            <button type="button" class="btn sm" data-act="addrange">${ic("plus")}${i18n.html("Add time range")}</button>
+          </div>
+          <div class="span" id="posting-fixed">
+            <div class="range-head"><b>${i18n.html("Fixed times")}</b><small class="sub">${i18n.html("Optional. When you add times, posts go out exactly at them and the ranges are ignored.")}</small></div>
+            <div class="time-list" id="posting-fixed-rows">${postingFixedRows(c)}</div>
+            <button type="button" class="btn sm" data-act="addfixed">${ic("plus")}${i18n.html("Add fixed time")}</button>
+          </div>
+          <p class="help span" id="posting-window-help">${i18n.html("Time zone of the computer running PeakCut: {0}.", esc(S.status.posting_timezone || ""))} ${i18n.html("Each range must end later than it starts on the same day. Saving updates posts already in the queue.")}</p>
           <p class="help span" id="posting-window-preview" role="status" aria-live="polite"></p>
         </div>
         <label class="f">${i18n.html("Who can see posts (YouTube, TikTok)")}<select data-k="privacy">${opts({public:i18n.t("Public"), unlisted:i18n.t("Unlisted"), private:i18n.t("Private")}, c.privacy)}</select></label>
@@ -2229,16 +2244,28 @@ function drawCreatorForm() {
     <div class="savebar" id="savebar"><span>${ic("warn")}${i18n.html("You have unsaved changes")}</span><button class="btn ghost" data-act="cdiscard">${i18n.html("Discard")}</button><button class="btn primary" data-act="csave">${ic("check")}${i18n.html("Save changes")}</button></div>`;
   updatePostingWindow();
 }
+function postingRangeRows(c) {
+  const rows = c.post_windows && c.post_windows.length ? c.post_windows : [{start: c.post_start_time || "09:00", end: c.post_end_time || "21:00"}];
+  return rows.map(r => `<div class="time-row" data-range><input type="time" step="60" required data-range-start value="${esc(r.start)}" aria-label="${i18n.html("Range start")}"><span aria-hidden="true">–</span><input type="time" step="60" required data-range-end value="${esc(r.end)}" aria-label="${i18n.html("Range end")}"><button type="button" class="btn sm icon ghost" data-act="delrange" title="${i18n.html("Remove this time range")}" aria-label="${i18n.html("Remove this time range")}">${ic("x")}</button></div>`).join("");
+}
+function postingFixedRows(c) {
+  return (c.post_fixed_times || []).map(t => `<div class="time-row" data-fixed><input type="time" step="60" required value="${esc(t)}" aria-label="${i18n.html("Fixed posting time")}"><button type="button" class="btn sm icon ghost" data-act="delfixed" title="${i18n.html("Remove this fixed time")}" aria-label="${i18n.html("Remove this fixed time")}">${ic("x")}</button></div>`).join("");
+}
 function updatePostingWindow() {
   const field = $("#posting-window"); if (!field) return;
   const enabled = $("#cform [data-k='post_window_enabled']").checked;
   const limited = $("#cform [data-k='daily_cap_enabled']").checked;
   const auto = enabled && limited;
   field.hidden = !enabled;
-  const start = field.querySelector("[data-k='post_start_time']"), end = field.querySelector("[data-k='post_end_time']");
-  start.disabled = end.disabled = !enabled;
-  end.setCustomValidity(enabled && start.value && end.value && end.value <= start.value
-    ? i18n.t("The posting end time must be later than the start time on the same day.") : "");
+  field.querySelectorAll("input").forEach(i => { i.disabled = !enabled; });
+  const toSec = value => { const [h, m] = value.split(":").map(Number); return h * 3600 + m * 60; };
+  let valid = true;
+  $$("#posting-range-rows .time-row").forEach(row => {
+    const s = row.querySelector("[data-range-start]"), e = row.querySelector("[data-range-end]");
+    const bad = enabled && s.value && e.value && toSec(e.value) <= toSec(s.value);
+    e.setCustomValidity(bad ? i18n.t("The posting end time must be later than the start time on the same day.") : "");
+    if (bad) valid = false;
+  });
   $("#post-interval-field").hidden = auto;
   $("#post-interval").disabled = auto;
   $("#custom-post-interval").hidden = auto || $("#post-interval").value !== "custom";
@@ -2247,23 +2274,54 @@ function updatePostingWindow() {
   $("#daily-post-limit").hidden = !limited;
   capInput.disabled = !limited;
   const preview = $("#posting-window-preview");
-  if (!enabled || !start.value || !end.value || !start.validity.valid || !end.validity.valid || (limited && !capInput.validity.valid)) {
-    preview.textContent = ""; return;
+  const fixed = $$("#posting-fixed-rows .time-row input").map(i => i.value).filter(Boolean).sort();
+  if (!enabled || !valid || (limited && !capInput.validity.valid)) { preview.textContent = ""; return; }
+  if (fixed.length) {
+    preview.textContent = i18n.t("Posts go out at these fixed times: {0}. Each time is used once per account each day.", fixed.join(" · "));
+    return;
   }
+  const ranges = $$("#posting-range-rows .time-row").map(r => ({
+    start: r.querySelector("[data-range-start]").value, end: r.querySelector("[data-range-end]").value
+  })).filter(r => r.start && r.end).sort((a, b) => toSec(a.start) - toSec(b.start));
+  const merged = ranges.reduce((all, r) => {
+    const last = all[all.length - 1];
+    if (last && toSec(r.start) <= toSec(last.end)) last.end = toSec(r.end) > toSec(last.end) ? r.end : last.end;
+    else all.push({...r});
+    return all;
+  }, []);
+  if (!merged.length) { preview.textContent = ""; return; }
   if (!limited) {
     preview.textContent = i18n.t("Without a daily limit, the posting interval is used within these hours."); return;
   }
-  const seconds = value => { const [h, m] = value.split(":").map(Number); return h * 3600 + m * 60; };
-  const count = Number(capInput.value), first = seconds(start.value), step = (seconds(end.value) - first) / count;
+  const total = merged.reduce((n, r) => n + toSec(r.end) - toSec(r.start), 0);
+  const count = Number(capInput.value), step = total / count;
   const format = value => {
     const s = Math.round(value), h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), sec = s % 60;
     return [h, m, ...(sec ? [sec] : [])].map(n => String(n).padStart(2, "0")).join(":");
   };
-  const times = Array.from({length: Math.min(count, 6)}, (_, i) => format(first + i * step));
-  if (count > 6) times.push("…", format(first + (count - 1) * step));
+  const at = offset => {
+    for (const r of merged) {
+      const length = toSec(r.end) - toSec(r.start);
+      if (offset <= length) return toSec(r.start) + offset;
+      offset -= length;
+    }
+    return toSec(merged[merged.length - 1].end);
+  };
+  const times = Array.from({length: Math.min(count, 6)}, (_, i) => format(at(i * step)));
+  if (count > 6) times.push("…", format(at((count - 1) * step)));
   preview.textContent = i18n.t("Up to {0} posts per account each day: {1}. Missed times wait for the next available slot.", count, times.join(" · "));
 }
-const creatorForm = () => { const d = {}; $$("#cform [data-k]").forEach(i => { if (i.disabled && ["post_start_time", "post_end_time"].includes(i.dataset.k)) return; if (i.type === "radio") { if (i.checked) d[i.dataset.k] = i.value; } else d[i.dataset.k] = i.type === "checkbox" ? i.checked : i.value; }); d.accounts = $$("#cform [data-acc]:checked").map(i => i.value); d.interactions = $$("#cform [data-interaction]:checked").map(i => i.value); return d; };
+const creatorForm = () => {
+  const d = {};
+  $$("#cform [data-k]").forEach(i => { if (i.type === "radio") { if (i.checked) d[i.dataset.k] = i.value; } else d[i.dataset.k] = i.type === "checkbox" ? i.checked : i.value; });
+  d.accounts = $$("#cform [data-acc]:checked").map(i => i.value);
+  d.interactions = $$("#cform [data-interaction]:checked").map(i => i.value);
+  if ($("#posting-range-rows")) d.post_windows = $$("#posting-range-rows .time-row").map(r => ({
+    start: r.querySelector("[data-range-start]").value, end: r.querySelector("[data-range-end]").value
+  }));
+  if ($("#posting-fixed-rows")) d.post_fixed_times = $$("#posting-fixed-rows .time-row input").map(i => i.value).filter(Boolean);
+  return d;
+};
 const dirty = on => $("#savebar")?.classList.toggle("on", on);
 async function saveCreator(quiet) {
   updatePostingWindow();
@@ -3665,6 +3723,19 @@ document.addEventListener("click", async e => {
     if (a === "acctmenu") return openAcct();
     if (a === "bellread") { await markRead(); return openBell().then(openBell); }
     if (a === "ntgo") { closePops(); const l = d.link || ""; if (l.startsWith("/app")) { const [v, tab] = fromPath(l); return go(v, tab); } if (l.startsWith("/")) location.href = l; return; }
+    if (a === "addrange") {
+      $("#posting-range-rows").insertAdjacentHTML("beforeend", postingRangeRows({post_windows: [{start: "12:00", end: "14:00"}]}));
+      updatePostingWindow(); dirty(true); return;
+    }
+    if (a === "delrange") {
+      if ($$("#posting-range-rows .time-row").length <= 1) return toast(i18n.t("Keep at least one time range."), "bad");
+      b.closest(".time-row").remove(); updatePostingWindow(); dirty(true); return;
+    }
+    if (a === "addfixed") {
+      $("#posting-fixed-rows").insertAdjacentHTML("beforeend", postingFixedRows({post_fixed_times: ["12:00"]}));
+      updatePostingWindow(); dirty(true); return;
+    }
+    if (a === "delfixed") { b.closest(".time-row").remove(); updatePostingWindow(); dirty(true); return; }
     if (a === "csave") return void await saveCreator();
     if (a === "cdiscard") { drawCreatorForm(); return toast(i18n.t("Changes discarded")); }
     if (a === "pause") { await send("/api/settings", {paused:!S.overview.paused}, "PUT"); return loadOverview(); }

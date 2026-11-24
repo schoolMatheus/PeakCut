@@ -22,7 +22,9 @@ def _mine() -> list:
     u = ctx.uid()
     return [p for p in _posts if p.get("user") == u]
 OPEN = ("scheduled", "posting")
-SCHEDULE_FIELDS = ("post_gap_min", "daily_cap_enabled", "daily_cap", "post_window_enabled", "post_start_time", "post_end_time")
+SCHEDULE_FIELDS = ("post_gap_min", "daily_cap_enabled", "daily_cap", "post_window_enabled", "post_start_time",
+                   "post_end_time", "post_windows", "post_fixed_times")
+FIXED_GRACE = 30 * 60   # a post planned for a fixed time may still go out this long after it
 
 
 def _save():
@@ -55,13 +57,31 @@ def _mirror(p):
         jobs.save(job)
 
 
-def _window(c):
-    return (c["post_start_time"], c["post_end_time"]) if c.get("post_window_enabled") else None
+def _windows(c):
+    """The parts of the day the creator posts in, or None when posting hours are off. Older creators have one
+    range, kept in post_start_time and post_end_time."""
+    if not c.get("post_window_enabled"):
+        return None
+    rows = c.get("post_windows") or []
+    return [(w["start"], w["end"]) for w in rows] if rows else [(c["post_start_time"], c["post_end_time"])]
 
 
-def _bounds(t, window):
-    day = datetime.fromtimestamp(t).date()
-    return tuple(datetime.combine(day, datetime.strptime(s, "%H:%M").time()).timestamp() for s in window)
+def _fixed_times(c):
+    """Exact clock times posts go out at, instead of being spread across the ranges."""
+    return list(c.get("post_fixed_times") or []) if c.get("post_window_enabled") else []
+
+
+def _timed(c):
+    return bool(_windows(c) or _fixed_times(c))
+
+
+def _seconds(value):
+    h, m = value.split(":")
+    return int(h) * 3600 + int(m) * 60
+
+
+def _day_start(t):
+    return datetime.combine(datetime.fromtimestamp(t).date(), datetime.min.time()).timestamp()
 
 
 def _next_day(t):
@@ -69,34 +89,95 @@ def _next_day(t):
     return datetime.combine(day, datetime.min.time()).timestamp()
 
 
-def _next_slot(account_id, gap_min, cap=None, window=None, *, earliest=0, exclude=()):
-    """Reserve the next time for this account. A window and daily limit divide the day into equal slots."""
+def _spans(t, windows):
+    day = _day_start(t)
+    return [(day + _seconds(s), day + _seconds(e)) for s, e in windows]
+
+
+def _next_range_start(t, windows):
+    """The first moment at or after t that falls inside one of the ranges."""
+    while True:
+        for start, end in _spans(t, windows):
+            if t < start:
+                return start
+            if t < end:
+                return t
+        t = _next_day(t)
+
+
+def _at_offset(spans, offset):
+    """The moment that many seconds into the day's ranges, skipping the gaps between them."""
+    for start, end in spans:
+        if offset <= end - start + 1e-9:
+            return start + offset
+        offset -= end - start
+    return None
+
+
+def _spread_slot(t, windows, cap):
+    """The first of the cap daily times, spread evenly across every range, that is at or after t. None when the
+    day's slots are used up."""
+    spans = _spans(t, windows)
+    step = sum(end - start for start, end in spans) / cap
+    elapsed = sum(end - start if t >= end else max(0, t - start) for start, end in spans)
+    index = math.ceil(elapsed / step - 1e-9)
+    return None if index >= cap else _at_offset(spans, index * step)
+
+
+def _current_slot(t, windows, cap):
+    """The daily time slot t itself belongs to."""
+    spans = _spans(t, windows)
+    step = sum(end - start for start, end in spans) / cap
+    elapsed = sum(end - start if t >= end else max(0, t - start) for start, end in spans)
+    return _at_offset(spans, math.floor(elapsed / step + 1e-9) * step)
+
+
+def _next_slot(account_id, c, *, earliest=0, exclude=()):
+    """Reserve the next time for this account, following its ranges, fixed times and daily limit."""
     mine = [p for p in _mine() if p["account"] == account_id and p["status"] in OPEN + ("posted",)
             and p["id"] not in exclude]
+    fixed = _fixed_times(c)
+    if fixed:
+        return _next_fixed(mine, fixed, c, earliest)
+    window = _windows(c)
+    cap = c["daily_cap"] if c.get("daily_cap_enabled", False) else None
     last = max((p.get("posted_at") or p["due_at"] for p in mine), default=0)
-    t = max(time.time(), earliest, last + (0.001 if window and cap else gap_min * 60))
+    t = max(time.time(), earliest, last + (0.001 if window and cap else c["post_gap_min"] * 60))
     while True:
         if window:
-            start, end = _bounds(t, window)
-            t = max(t, start)
-            if t >= end:
-                t = _next_day(t)
-                continue
             if cap:
-                step = (end - start) / cap
-                index = math.ceil((t - start) / step - 1e-9)
-                if index >= cap:
+                slot = _spread_slot(t, window, cap)
+                if slot is None:
                     t = _next_day(t)
                     continue
-                t = start + index * step
+                t = slot
+            else:
+                t = _next_range_start(t, window)
         if cap is None or sum(1 for p in mine if _day(p.get("posted_at") or p["due_at"]) == _day(t)) < cap:
             return t
         t = _next_day(t)
 
 
-def _scheduled_at(account_id, c, *, earliest=0, exclude=()):
+def _next_fixed(mine, fixed, c, earliest):
+    """The next fixed time that is free for this account, today or on a later day."""
     cap = c["daily_cap"] if c.get("daily_cap_enabled", False) else None
-    return _next_slot(account_id, c["post_gap_min"], cap, _window(c), earliest=earliest, exclude=exclude)
+    taken = {p["due_at"] for p in mine}
+    t = max(time.time(), earliest)
+    while True:
+        day = _day_start(t)
+        used = sum(1 for p in mine if _day(p.get("posted_at") or p["due_at"]) == _day(day))
+        for value in fixed:
+            when = day + _seconds(value)
+            if when < t or when in taken:
+                continue
+            if cap is not None and used >= cap:
+                break
+            return when
+        t = _next_day(t)
+
+
+def _scheduled_at(account_id, c, *, earliest=0, exclude=()):
+    return _next_slot(account_id, c, earliest=earliest, exclude=exclude)
 
 
 def _reschedule_accounts(account_ids):
@@ -199,7 +280,7 @@ def _post(p):
             p.update(status="scheduled", due_at=time.time() + 600)  # try again in 10 minutes
             p["retry_at"] = p["due_at"]
             c = creators.get(p["creator"]) or creators.DEFAULTS
-            if _window(c) and not p.get("immediate"):
+            if _timed(c) and not p.get("immediate"):
                 with _lock:
                     p["due_at"] = _scheduled_at(p["account"], c, earliest=p["retry_at"], exclude={p["id"]})
         else:
@@ -212,22 +293,29 @@ def _post(p):
 
 def _window_available(p, c, now):
     """Check actual sends too: a paused or stopped app may have missed its planned times."""
-    window = _window(c)
-    if not window or p.get("immediate"):
+    if p.get("immediate"):
         return True
-    start, end = _bounds(now, window)
-    if not start <= now < end:
-        return False
     sent = [q for q in _mine() if q["id"] != p["id"] and q["account"] == p["account"]
             and q["status"] in ("posted", "posting")]
     stamps = [q.get("posted_at") or q["due_at"] for q in sent]
+    fixed = _fixed_times(c)
+    if fixed:
+        if now < p["due_at"] or now > p["due_at"] + FIXED_GRACE:
+            return False
+        if c.get("daily_cap_enabled"):
+            return sum(_day(t) == _day(now) for t in stamps) < c["daily_cap"]
+        return True
+    window = _windows(c)
+    if not window:
+        return True
+    if not any(start <= now < end for start, end in _spans(now, window)):
+        return False
     if c.get("daily_cap_enabled"):
         cap = c["daily_cap"]
         if sum(_day(t) == _day(now) for t in stamps) >= cap:
             return False
-        step = (end - start) / cap
-        slot_start = start + math.floor((now - start) / step) * step
-        return not any(slot_start <= t < end for t in stamps)
+        slot = _current_slot(now, window, cap)
+        return slot is not None and not any(t >= slot for t in stamps)
     return all(t + c["post_gap_min"] * 60 <= now for t in stamps)
 
 
@@ -302,7 +390,7 @@ def retry(pid):
         if not p or p["status"] not in ("failed", "cancelled"):
             raise ValueError("Only failed or cancelled posts can be retried.")
         c = creators.get(p["creator"]) or creators.DEFAULTS
-        due = _scheduled_at(p["account"], c, exclude={p["id"]}) if _window(c) and not p.get("immediate") else time.time()
+        due = _scheduled_at(p["account"], c, exclude={p["id"]}) if _timed(c) and not p.get("immediate") else time.time()
         p.update(status="scheduled", due_at=due, tries=0, error=None)
         p.pop("retry_at", None)
         _save()

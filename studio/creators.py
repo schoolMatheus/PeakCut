@@ -21,6 +21,7 @@ DEFAULTS = {"name": "", "channel": "", "style": "bounce", "layout": "blur", "cap
             "trigger_words": "clip that, clip it",
             "autopost": False, "accounts": [], "post_min_score": 75, "post_gap_min": 45, "daily_cap_enabled": False, "daily_cap": 6,
             "post_window_enabled": False, "post_start_time": "09:00", "post_end_time": "21:00",
+            "post_windows": [], "post_fixed_times": [],
             "privacy": "public", "post_footer": "", "rate_per_1k": 0.0, "channels": {},
             "lang": "en", "interactions": []}
 PLATFORMS = ("youtube", "twitch", "kick")
@@ -68,6 +69,42 @@ def _fix(c: dict) -> dict:
     return c
 NUMERIC = {"min_len": (5, 120), "max_len": (10, 180), "max_clips": (1, 20), "min_score": (0, 100), "buffer_min": (5, 120), "live_per_hour": (1, 60), "ai_every_min": (1, 30), "auto_jump_pct": (20, 300), "must_clip_min": (0, 240), "min_gap_min": (0, 60),
            "post_min_score": (0, 100), "post_gap_min": (5, 1440), "daily_cap": (1, 50)}
+TIME = re.compile(r"(?:[01]\d|2[0-3]):[0-5]\d")
+
+
+def clean_time(value) -> str:
+    if not isinstance(value, str) or not TIME.fullmatch(value):
+        raise ValueError("Enter posting times in HH:MM format, from 00:00 to 23:59.")
+    return value
+
+
+def clean_windows(value) -> list:
+    """The parts of the day a creator posts in. Each range starts and ends on the same day."""
+    if not isinstance(value, list) or len(value) > 8:
+        raise ValueError("Posting time ranges must be a list of up to 8 ranges.")
+    out = []
+    for item in value:
+        if not isinstance(item, dict):
+            raise ValueError("Each posting time range needs a start and an end.")
+        start, end = clean_time(item.get("start")), clean_time(item.get("end"))
+        if end <= start:
+            raise ValueError("The posting end time must be later than the start time on the same day.")
+        out.append({"start": start, "end": end})
+    out.sort(key=lambda w: w["start"])
+    merged = []
+    for w in out:                       # ranges that touch or overlap become one, so a time is never counted twice
+        if merged and w["start"] <= merged[-1]["end"]:
+            merged[-1]["end"] = max(merged[-1]["end"], w["end"])
+        else:
+            merged.append(dict(w))
+    return merged
+
+
+def clean_fixed_times(value) -> list:
+    """Exact clock times, instead of spreading posts across the ranges."""
+    if not isinstance(value, list) or len(value) > 24:
+        raise ValueError("Fixed posting times must be a list of up to 24 times.")
+    return sorted({clean_time(v) for v in value})
 
 
 def root(cid) -> Path:
@@ -83,9 +120,16 @@ def _clean(data: dict) -> dict:
             if k in data:
                 out[k] = clean_interactions(data[k])
             continue
+        if k == "post_windows":
+            if k in data:
+                out[k] = clean_windows(data[k])
+            continue
+        if k == "post_fixed_times":
+            if k in data:
+                out[k] = clean_fixed_times(data[k])
+            continue
         if k in ("post_start_time", "post_end_time") and k in data:
-            if not isinstance(data[k], str) or not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", data[k]):
-                raise ValueError("Enter posting times in HH:MM format, from 00:00 to 23:59.")
+            clean_time(data[k])
         if k == "post_window_enabled" and k in data and not isinstance(data[k], bool):
             raise ValueError("The daily posting window must be on or off.")
         if k == "captions":
@@ -124,12 +168,22 @@ def _clean(data: dict) -> dict:
         else:
             v = str(v).strip()[:300]
         out[k] = v
+    # The older single start/end pair stays in step with the first range, so anything still reading it sees a
+    # sensible day. When only the pair is sent (an older page), the ranges are cleared and the pair is the truth.
+    if out.get("post_windows"):
+        out.setdefault("post_start_time", out["post_windows"][0]["start"])
+        out.setdefault("post_end_time", out["post_windows"][0]["end"])
+    elif ("post_start_time" in data or "post_end_time" in data) and "post_windows" not in data:
+        out["post_windows"] = []
     return out
 
 
 def _validate_window(c):
-    if c["post_window_enabled"] and c["post_end_time"] <= c["post_start_time"]:
-        raise ValueError("The posting end time must be later than the start time on the same day.")
+    if not c["post_window_enabled"]:
+        return
+    for w in c.get("post_windows") or [{"start": c["post_start_time"], "end": c["post_end_time"]}]:
+        if w["end"] <= w["start"]:
+            raise ValueError("The posting end time must be later than the start time on the same day.")
 
 
 _mem: dict = {}   # user -> {creator id: creator}. The files stay the truth; this saves re-reading them on every page check.
