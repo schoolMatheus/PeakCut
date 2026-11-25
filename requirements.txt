@@ -8,9 +8,9 @@ sherpa-onnx==2.0.1
 soundfile==0.14.0
 SQLAlchemy==2.0.57
 uvicorn==0.54.0
-# Python 3.11 and newer get the newest yt-dlp with its YouTube signature scripts (yt-dlp-ejs); 2026.10.26 needs
-# Python 3.11, so older setups stay on the previous one. Without the scripts, yt-dlp cannot solve YouTube's
-# challenges when we send cookies, and videos come back with no playable formats.
+# Python 3.11 and newer get the newest yt-dlp with its YouTube signature scripts (yt-dlp-ejs); 2026.11.23 needs
+# Python 3.11, so older setups stay on the previous one. Without the scripts, or with the older 2026.10.26, yt-dlp
+# cannot solve YouTube's challenges when we send cookies, and videos come back with no playable formats.
 yt-dlp==2026.10.21; python_version < "3.11"
-yt-dlp[default]==2026.10.26; python_version >= "3.11"
+yt-dlp[default]==2026.11.23; python_version >= "3.11"
 pillow==11.3.0
