@@ -320,6 +320,7 @@ const peakcutPortuguese = {
   "Choose the language for clip titles, descriptions, opening text and subtitles. Saved automatically for new videos, live recordings and clips you re-make. Translating from another language requires an AI service.": "Escolha o idioma dos títulos, descrições, textos de abertura e legendas dos clipes. A alteração é salva automaticamente para novos vídeos, gravações ao vivo e clipes que você refizer. Para traduzir de outro idioma, configure um serviço de IA.",
   "Choose one of the AI services in the list.": "Escolha um dos serviços de IA na lista.",
   "Choose the accounts this creator's clips go to. One account can be shared by several creators.": "Escolha em quais contas os clipes deste criador serão publicados. Vários criadores podem usar a mesma conta.",
+  "Chosen automatically: the connected account with the same name as this creator's channel. One account can be shared by several creators.": "Escolhida automaticamente: a conta conectada com o mesmo nome do canal deste criador. Vários criadores podem usar a mesma conta.",
   "Client streams and recordings": "Transmissões e gravações de clientes",
   " clip": " clipe",
   "Clip": "Clipe",

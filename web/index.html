@@ -235,6 +235,7 @@ label.sw small{display:block;color:var(--dim);font-size:12px;font-weight:400}
 label.ck{display:inline-flex;align-items:center;gap:8px;height:36px;padding:0 13px;border-radius:var(--r);cursor:pointer;background:#fff;border:1px solid var(--line-2);font-weight:500}
 label.ck:has(input:checked){background:var(--brand-soft);border-color:var(--brand-line);color:var(--brand-ink)}
 label.ck input{accent-color:var(--brand);margin:0}
+.acc-static{display:inline-flex;align-items:center;gap:8px;height:36px;padding:0 13px;border-radius:var(--r);background:var(--brand-soft);border:1px solid var(--brand-line);color:var(--brand-ink);font-weight:500;cursor:default}
 [data-caption-style]:disabled{opacity:.45;cursor:default}
 .interaction-options{border:0;padding:0;margin:0;min-width:0}
 .interaction-options legend{padding:0;margin-bottom:8px}
@@ -2225,9 +2226,22 @@ function unfoldFor(el) {
     btn.title = label; btn.setAttribute("aria-label", label);
   }
 }
+function accountKey(name) {
+  return String(name || "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/^@+/, "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+function creatorPostAccounts(c) {
+  // The account a creator posts from is the one with their channel's name: you are already on that
+  // creator's page, so there is nothing to pick.
+  const names = [c.name, c.profile && c.profile.name, ...Object.values(c.profiles || {}).map(p => p && p.name)];
+  const keys = new Set(names.map(accountKey).filter(Boolean));
+  return S.accounts.filter(a => keys.has(accountKey(a.name)));
+}
 function drawCreatorForm() {
   const c = creator(), box = $("#cform"); if (!c || !box) return;
-  const A = S.accounts;
+  const A = S.accounts, postAcc = A.length ? creatorPostAccounts(c) : [];
+  const accHelp = !A.length ? i18n.t("No accounts are connected yet. Connect one in Social networks, then come back.")
+    : postAcc.length ? i18n.t("Chosen automatically: the connected account with the same name as this creator's channel. One account can be shared by several creators.")
+    : i18n.t("Choose the accounts this creator's clips go to. One account can be shared by several creators.");
   const postIntervals = [5, 10, 15, 30, 45, 60, 90, 120];
   const customPostInterval = !postIntervals.includes(Number(c.post_gap_min));
   box.innerHTML = `<div class="card"><div class="card-head"><div><h2>TimeLine Post</h2><p class="help">${i18n.html("The videos still waiting to post, in the order they will go out. Drag a video, or use the arrows, to change the order.")}</p></div>${foldBtn("timeline")}</div>
@@ -2262,9 +2276,11 @@ function drawCreatorForm() {
         <label class="f span">${i18n.html("Big text on every clip")}<input data-k="hook_text" maxlength="60" value="${esc(c.hook_text || "")}" placeholder="${i18n.html("Left empty, the AI writes a different one for each clip")}"></label>
         <label class="f span">${i18n.html("Description for every clip")}<textarea data-k="description_text" rows="3" maxlength="2000">${esc(c.description_text || "")}</textarea><small class="sub">${i18n.html("Written once, used exactly as typed on every clip.")}</small></label>
         <label class="f">${i18n.html("Minutes to keep")}<input data-k="buffer_min" type="number" value="${c.buffer_min}"><small class="sub">${i18n.html("Minutes of live stream to keep")}</small></label></div></div></div>
-    <div class="card"><div class="card-head"><div><h2>${i18n.html("Posting")}</h2><p class="help">${A.length ? i18n.t("Choose the accounts this creator's clips go to. One account can be shared by several creators.") : i18n.t("No accounts are connected yet. Connect one in Social networks, then come back.")}</p></div>${foldBtn("posting")}</div>
+    <div class="card"><div class="card-head"><div><h2>${i18n.html("Posting")}</h2><p class="help">${accHelp}</p></div>${foldBtn("posting")}</div>
       <div class="card-body"${cardFolded("posting") ? " hidden" : ""}>
-      ${A.length ? `<div class="row" style="margin-bottom:16px">${A.map(a => `<label class="ck"><input type="checkbox" data-acc value="${esc(a.id)}" ${c.accounts.includes(a.id) ? "checked" : ""}>${esc(a.label)} · ${esc(a.name)}</label>`).join("")}</div>` : `<button class="btn" data-act="go" data-v="social" style="margin-bottom:16px">${ic("plug")}${i18n.html("Open Social networks")}</button>`}
+      ${!A.length ? `<button class="btn" data-act="go" data-v="social" style="margin-bottom:16px">${ic("plug")}${i18n.html("Open Social networks")}</button>`
+        : postAcc.length ? `<div class="row" style="margin-bottom:16px">${postAcc.map(a => `<span class="acc-static">${esc(a.label)} · ${esc(a.name)}</span><input type="checkbox" data-acc value="${esc(a.id)}" checked hidden>`).join("")}</div>`
+        : `<div class="row" style="margin-bottom:16px">${A.map(a => `<label class="ck"><input type="checkbox" data-acc value="${esc(a.id)}" ${c.accounts.includes(a.id) ? "checked" : ""}>${esc(a.label)} · ${esc(a.name)}</label>`).join("")}</div>`}
       <div class="fields"><label class="sw span"><input type="checkbox" data-k="autopost" ${c.autopost ? "checked" : ""}><span>${i18n.html("Post new clips automatically")}<small>${i18n.html("Clips that score high enough go out without you approving them.")}</small></span></label>
         <label class="f" id="post-min-score-field" ${c.autopost ? "" : "hidden"}>${i18n.html("Minimum score for auto-posting")}<input data-k="post_min_score" type="number" min="0" max="100" value="${c.post_min_score}" ${c.autopost ? "" : "disabled"}></label>
         <label class="f" id="post-interval-field">${i18n.html("Posting interval")}<select id="post-interval">
