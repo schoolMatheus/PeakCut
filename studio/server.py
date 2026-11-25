@@ -1500,15 +1500,16 @@ async def draft_custom_motion(cid: str, action: str = Form(""), action_descripti
     creator = creators.get(cid)
     palette_colors = None
     if palette == "youtube":
-        palette_colors = {k: ist.YOUTUBE[k] for k in ("background", "ink", "accent")}
+        palette_colors = {k: ist.YOUTUBE[k] for k in ("background", "ink", "accent", "detail")}
     elif palette:
         style = next((s for s in creator.get("interaction_styles") or [] if s.get("id") == palette), None)
         if style:
-            palette_colors = {k: style[k] for k in ("background", "ink", "accent")}
+            palette_colors = {k: style[k] for k in ("background", "ink", "accent", "detail")}
     try:
         brief = cm.ask_brief({"action": action, "action_description": action_description,
                               "image_prompt": image_prompt, "has_image": True, "language": language,
-                              "palette_colors": palette_colors})
+                              "palette_colors": palette_colors,
+                              "character_color": cm.dominant_color(picture)})
         draft_ = cm.draft(cid, brief, picture, accounts.settings().get("lottie_checkout", ""))
     except ValueError as e:
         raise HTTPException(400, str(e))

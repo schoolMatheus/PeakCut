@@ -1745,7 +1745,7 @@ async function openCustomMotion(given) {
       ${(c.interaction_styles || []).map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join("")}
     </select><span class="hint">${i18n.html("Leave it to the AI, or use the built-in YouTube colors or one of this creator's styles.")}</span></label>
     <label class="f">${i18n.html("How should the action animation look?")}<textarea id="cm_desc" rows="3" maxlength="600" placeholder="${i18n.html("For example: quick and cheerful, bold purple letters, a little bouncing star")}"></textarea></label>
-    <label class="f">${i18n.html("Cut-out picture (transparent PNG)")}<input type="file" id="cm_image" accept="image/png"><span class="hint">${i18n.html("Send a PNG with the background removed. PeakCut will animate only the picture, with no background or box.")}</span></label>
+    <label class="f">${i18n.html("Cut-out picture (transparent PNG)")}<input type="file" id="cm_image" accept="image/png"><span class="hint">${i18n.html("Send a PNG with the background removed. PeakCut uses it as a colour and identity reference and draws six new poses of the character.")}</span></label>
     <label class="f">${i18n.html("What should the character do?")}<textarea id="cm_image_prompt" rows="2" maxlength="300" placeholder="${i18n.html("Wave goodbye, laugh, cry, jump…")}"></textarea></label>
     <div id="cm_review" hidden>
       <h3>${i18n.html("Check both motions")}</h3>

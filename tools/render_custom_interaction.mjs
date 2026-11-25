@@ -42,8 +42,6 @@ if (imageArg) {
   const name = path.basename(image);
   if (!/^[\w\-]+\.(png|jpe?g|webp)$/i.test(name)) throw new Error("The picture has an unexpected name.");
   assets[name] = new Uint8Array(fs.readFileSync(image));
-  const names = doc.assets.filter(a => a.p === name).map(a => a.id);
-  if (!names.length) throw new Error("The scene does not use the uploaded picture.");
 }
 const anim = ck.MakeManagedAnimation(raw, assets);
 if (!anim) throw new Error("Skottie could not read that scene.");

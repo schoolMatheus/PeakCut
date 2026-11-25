@@ -13,6 +13,7 @@ import re
 import shutil
 import subprocess
 import time
+from collections import Counter
 from pathlib import Path
 
 from . import brain, config, interactions
@@ -40,11 +41,17 @@ MOTION_SCHEMA = {
         "background": {"type": "STRING"},
         "ink": {"type": "STRING"},
         "accent": {"type": "STRING"},
+        "detail": {"type": "STRING"},
         "image_action": {"type": "STRING"},
         "label": {"type": "STRING"},
         "note": {"type": "STRING"},
+        "action_style": {"type": "STRING"},
+        "card_shape": {"type": "STRING"},
+        "motion_feel": {"type": "STRING"},
+        "beats": {"type": "STRING"},
     },
-    "required": ["style", "background", "ink", "accent", "image_action", "label", "note"],
+    "required": ["style", "background", "ink", "accent", "detail", "image_action", "label", "note",
+                 "action_style", "card_shape", "motion_feel", "beats"],
 }
 
 PROMPT = """You are the art director for two short motions that will play together in a vertical video. Both are 800x240,
@@ -65,16 +72,23 @@ The person's description of the character motion:
 
 Answer with one JSON object and nothing else:
 {{"style":"one short sentence about the card's visual direction","background":"#rrggbb","ink":"#rrggbb",
-  "accent":"#rrggbb","image_action":"one of wave, jump, spin, enter, pop, cry, laugh","label":"short call to action, at most 22 characters","note":"one short sentence in {language} explaining both choices"}}
+  "accent":"#rrggbb","detail":"#rrggbb","image_action":"one of wave, jump, spin, enter, pop, cry, laugh",
+  "label":"short call to action, at most 22 characters","note":"one short sentence in {language} describing the six new drawings",
+  "action_style":"one of bold, clean, playful","card_shape":"one of rounded, pill, square",
+  "motion_feel":"one of snappy, bouncy, calm","beats":"six short comma-separated descriptions of the character's six new drawings"}}
 
 {palette_line}
 
 Rules:
-- background is a dark color for the card, ink is readable text on it, accent is the one bright highlight.
-- image_action is how the cut-out picture should move:
-  wave = friendly side-to-side greeting; jump = excited bounce; spin = playful full turn; enter = slides in from the side;
-  pop = grows and settles; cry = sinks and wobbles; laugh = bounces with a happy wobble.
-- The character motion must contain only the picture. Never add a card, a box, a shadow or a background to it.
+- background is the dark card, ink is readable text, accent is the bright highlight, detail is a quiet second color for outlines and small marks.
+- action_style, card_shape and motion_feel must come from the person's description of the action motion. Bold uses heavy marks and strong contrast; clean uses thin outlines and calm motion; playful uses soft round shapes and a small bounce. Rounded, pill and square change the card corners. Snappy, bouncy and calm change the timing.
+- image_action is the behavior the new drawings must show across the beats:
+  wave = friendly side-to-side greeting with a raised hand; jump = excited bounce with a changing pose;
+  spin = playful full turn seen from different angles; enter = slides in from the side and settles;
+  pop = grows and settles with a changing expression; cry = tears appear and the face drops;
+  laugh = closed smiling eyes and a bouncing pose.
+- beats must name six different new drawings of the character in order. Describe poses and expressions, never say the same picture is merely moved, rotated or scaled.
+- Draw the character with vector shapes in these six states. Do not paste the uploaded picture into the motion; use it only as a reference for the character's colors and identity. Never add a card, a box, a shadow or a background.
 - Keep the card readable when shown small over a video. One focal subject, one accent, no clutter.
 - Never describe or copy a logo, a face or a person's identity in the label."""
 
@@ -105,11 +119,20 @@ def clean_brief(value) -> dict:
     language = "pt-BR" if value.get("language") == "pt-BR" else "en"
     fallback = LABELS[action][language][0]
     label = _text(value.get("label"), 22) or fallback
+    style = str(value.get("action_style") or "clean")
+    shape = str(value.get("card_shape") or "rounded")
+    feel = str(value.get("motion_feel") or "snappy")
     return {"action": action, "style": _text(value.get("style"), 200),
             "background": _color(value.get("background"), "#121212"),
             "ink": _color(value.get("ink"), "#ffffff"),
             "accent": _color(value.get("accent"), "#ff4d4d"),
+            "detail": _color(value.get("detail"), "#ff8800"),
             "image_action": behavior, "label": label, "note": _text(value.get("note"), 160),
+            "action_style": style if style in ("bold", "clean", "playful") else "clean",
+            "card_shape": shape if shape in ("rounded", "pill", "square") else "rounded",
+            "motion_feel": feel if feel in ("snappy", "bouncy", "calm") else "snappy",
+            "beats": _text(value.get("beats"), 240),
+            "character_color": _color(value.get("character_color"), _color(value.get("accent"), "#ff4d4d")),
             "has_image": has_image, "language": language}
 
 
@@ -144,9 +167,9 @@ def ask_brief(value: dict) -> dict:
     image_line = _text(value.get("image_prompt"), 300) or "a friendly greeting."
     palette = value.get("palette_colors")
     if palette:
-        palette_line = ("Use exactly these colors for the card: background " + palette["background"]
+        palette_line = ("Use exactly these colors for the motion: background " + palette["background"]
                         + ", ink " + palette["ink"] + ", accent " + palette["accent"]
-                        + ". Do not choose different ones.")
+                        + ", detail " + palette.get("detail", "#ff8800") + ". Do not choose different ones.")
     else:
         palette_line = "Choose the three colors yourself, following the description."
     spoken = "Brazilian Portuguese" if brief["language"] == "pt-BR" else "English"
@@ -155,11 +178,12 @@ def ask_brief(value: dict) -> dict:
     got, _model, _tokens = brain.ask_ai(prompt, MOTION_SCHEMA, purpose="Interaction motion: brief", timeout=120)
     parsed = _answer(got)
     merged = {**brief, **{k: parsed.get(k) for k in ("style", "background", "ink", "accent",
-                                                     "image_action", "label", "note")}}
+                                                     "image_action", "label", "note", "action_style",
+                                                     "card_shape", "motion_feel", "beats")}}
     if palette:
         # A chosen palette wins: the AI may only decide the drawing and the words.
-        for key in ("background", "ink", "accent"):
-            merged[key] = palette[key]
+        for key in ("background", "ink", "accent", "detail"):
+            merged[key] = palette.get(key, merged[key])
     return clean_brief(merged)
 
 
@@ -167,14 +191,20 @@ def _static(value):
     return {"a": 0, "k": value}
 
 
-def _animated(frames):
-    """Easing anchors from the Lottie motion guide: a sharp entrance and a soft settle."""
+EASE = {"snappy": (.20, .75, .34, .94),
+        "bouncy": (.94, .75, .34, 1.12),
+        "calm": (.00, .65, .51, .99)}
+
+
+def _animated(frames, feel="snappy"):
+    """Easing anchors from the Lottie motion guide, chosen by how the motion should feel."""
+    x1, y1, x2, y2 = EASE.get(feel, EASE["snappy"])
     out = []
     for i, (t, value) in enumerate(frames):
         item = {"t": t, "s": value if isinstance(value, list) else [value]}
         if i < len(frames) - 1:
-            item["o"] = {"x": [.20], "y": [.75]}
-            item["i"] = {"x": [.34], "y": [.94]}
+            item["o"] = {"x": [x1], "y": [y1]}
+            item["i"] = {"x": [x2], "y": [y2]}
         out.append(item)
     return {"a": 1, "k": out}
 
@@ -197,6 +227,10 @@ def _stroke(color, width=4):
 
 def _rect(x, y, w, h, radius=18):
     return {"ty": "rc", "p": _static([x, y]), "s": _static([w, h]), "r": _static(radius), "d": 1}
+
+
+def _ellipse(x, y, size):
+    return {"ty": "el", "p": _static([x, y]), "s": _static([size, size]), "d": 1}
 
 
 def _path(points, closed=True):
@@ -236,7 +270,8 @@ def build_lottie(brief: dict, kind: str, image_name: str = "") -> dict:
     if kind not in ("action", "character"):
         raise ValueError("That motion part isn't valid.")
     brief = clean_brief(brief)
-    bg, ink, accent = brief["background"], brief["ink"], brief["accent"]
+    bg, ink, accent, detail = (brief[k] for k in ("background", "ink", "accent", "detail"))
+    feel, style, shape = brief["motion_feel"], brief["action_style"], brief["card_shape"]
     layers = []
     next_index = 2
 
@@ -247,33 +282,76 @@ def build_lottie(brief: dict, kind: str, image_name: str = "") -> dict:
         next_index += 1
 
     if kind == "character":
-        if not image_name:
-            raise ValueError("The character motion needs a cut-out picture.")
-        # Only the picture: no card, no box, no background. It performs the gesture in the middle of the strip.
-        layers.append({"ddd": 0, "ind": next_index, "ty": 2, "nm": "Character", "sr": 1,
-                       "ks": _transform({"a": _static([110, 110, 0]),
-                                         "p": _animated([(0, [180, 120, 0]), (14, [180, 120, 0]),
-                                                         (104, [180, 120, 0]), (119, [210, 100, 0])]),
-                                         "o": _animated([(0, 0), (10, 100), (104, 100), (119, 0)]),
-                                         **_motion_for(brief["image_action"])}),
-                       "ao": 0, "ip": 0, "op": FRAMES, "st": 0, "bm": 0, "refId": "picture"})
-        assets = [{"id": "picture", "w": 220, "h": 220, "u": "", "p": image_name, "e": 0}]
+        # Six new vector drawings of the character, one per beat. The uploaded cut-out only gave us its color.
+        color, behavior = brief["character_color"], brief["image_action"]
+        for beat in range(6):
+            ip, op = beat * 20, (beat + 1) * 20
+            dy = -10 if behavior in ("jump", "pop", "laugh") and beat % 2 else 0
+            cx, cy = 180, 120 + dy
+            shapes = [_ellipse(cx, cy + 34, 106), _fill(color), _stroke(detail, 4),
+                      _ellipse(cx, cy - 32, 94), _fill(color), _stroke(detail, 4)]
+            if behavior == "laugh" and beat % 2:
+                for ex in (cx - 19, cx + 19):
+                    shapes += [_path([[ex - 9, cy - 30], [ex, cy - 37], [ex + 9, cy - 30]], False), _stroke(ink, 4)]
+            else:
+                for ex in (cx - 19, cx + 19):
+                    shapes += [_ellipse(ex, cy - 32, 13), _fill(ink)]
+            if behavior == "laugh":
+                mouth = [[cx - 18, cy + 4], [cx, cy + 18], [cx + 18, cy + 4]]
+            elif behavior == "cry":
+                mouth = [[cx - 16, cy + 18], [cx, cy + 8], [cx + 16, cy + 18]]
+            elif behavior in ("wave", "jump", "pop", "enter", "spin"):
+                mouth = [[cx - 13, cy + 10], [cx + 13, cy + 10]]
+            else:
+                mouth = [[cx - 13, cy + 12], [cx + 13, cy + 12]]
+            shapes += [_path(mouth, False), _stroke(accent if behavior == "laugh" else detail, 4)]
+            if behavior == "cry":
+                shapes += [_ellipse(cx - 28, cy - 10 + beat * 2, 11), _fill(accent),
+                           _ellipse(cx + 28, cy - 8 + beat * 2, 11), _fill(accent)]
+            if behavior == "wave":
+                lift = -30 - beat * 8
+                arm = [[cx + 28, cy + 20], [cx + 52, cy + 20 + lift // 3], [cx + 68, cy + 14 + lift // 2]]
+                shapes += [_path(arm, False), _stroke(color, 10),
+                           _ellipse(cx + 70, cy + 12 + lift // 2, 20), _fill(color), _stroke(detail, 3)]
+            elif behavior in ("jump", "pop", "laugh"):
+                shapes += [_path([[cx - 30, cy + 18], [cx - 58, cy - beat * 3]], False), _stroke(color, 9),
+                           _path([[cx + 30, cy + 18], [cx + 58, cy - beat * 3]], False), _stroke(color, 9)]
+            if beat in (1, 3, 5):
+                shapes += [_ellipse(cx + 96, cy - 60, 12), _fill(accent)]
+            add(f"New drawing {beat + 1}", shapes, ip, op,
+                {"o": _animated([(ip, 0), (ip + 3, 100), (op - 3, 100), (op, 0)], "calm")})
+        assets = []
     else:
-        add("Card", [_rect(410, 120, 640, 124, 24), _fill(bg)], 0, FRAMES,
+        corner = {"pill": 62, "square": 6, "rounded": 24}.get(shape, 24)
+        if style == "bold":
+            corner = max(6, corner - 8)
+        radius = 24 if style == "bold" else 18
+        add("Card", [_rect(410, 120, 640, 124, corner), _fill(bg), _stroke(detail, radius // 6)], 0, FRAMES,
             {"a": _static([400, 120, 0]),
-             "p": _animated([(0, [400, 156, 0]), (16, [400, 120, 0]), (104, [400, 120, 0]), (119, [420, 100, 0])]),
-             "o": _animated([(0, 0), (7, 100), (105, 100), (119, 0)])})
-        add("Accent", [_rect(140, 120, 26, 96, 12), _fill(accent)], 12, 108,
-            {"o": _animated([(12, 0), (20, 100), (102, 100), (108, 0)])})
+             "p": _animated([(0, [400, 156, 0]), (16, [400, 120, 0]), (104, [400, 120, 0]), (119, [420, 100, 0])], feel),
+             "o": _animated([(0, 0), (7, 100), (105, 100), (119, 0)], feel)})
+        symbols = {
+            "subscribe": [[134, 102], [134, 140], [170, 121]],
+            "like": [[124, 141], [124, 108], [137, 108], [150, 80], [161, 80], [166, 88],
+                     [160, 109], [186, 109], [194, 118], [181, 157], [148, 157], [137, 148], [124, 148]],
+            "comment": [[117, 86], [186, 86], [186, 138], [151, 138], [128, 160], [128, 138], [117, 138]],
+            "share": [[119, 150], [128, 119], [158, 107], [158, 84], [198, 121], [158, 157], [158, 134], [138, 136]],
+            "save": [[127, 86], [181, 86], [181, 158], [154, 141], [127, 158]],
+        }
+        add("Action symbol", [_path(symbols[brief["action"]]), _fill(accent)], 10, 108,
+            {"o": _animated([(10, 0), (20, 100), (100, 100), (108, 0)], feel)})
+        add("Detail mark", [_rect(400, 166, 560 if style != "clean" else 420, 5, 3), _fill(detail)], 14, 106,
+            {"o": _animated([(14, 0), (24, 100), (98, 100), (106, 0)], "calm")})
         tick = [[590, 120], [600, 132], [622, 104]]
-        add("Confirmation", [_path(tick, False), _stroke(accent, 7)], 86, FRAMES,
-            {"o": _animated([(86, 0), (94, 100), (119, 100)])})
-        document = {"t": brief["label"], "f": "Poppins", "s": 40, "j": 0, "tr": 0, "lh": 50, "ls": 0,
+        add("Confirmation", [_path(tick, False), _stroke(accent, 8 if style == "bold" else 6)], 86, FRAMES,
+            {"o": _animated([(86, 0), (94, 100), (119, 100)], feel)})
+        document = {"t": brief["label"], "f": "Poppins", "s": 44 if style == "bold" else 40,
+                    "j": 0, "tr": 0, "lh": 50, "ls": 0,
                     "fc": [int(ink[i:i + 2], 16) / 255 for i in (1, 3, 5)]}
         layers.append({"ddd": 0, "ind": next_index, "ty": 5, "nm": "Call to action", "sr": 1,
                        "ks": _transform({"p": _animated([(0, [400, 156, 0]), (16, [400, 120, 0]),
-                                                         (104, [400, 120, 0]), (119, [420, 100, 0])]),
-                                         "o": _animated([(0, 0), (8, 100), (104, 100), (119, 0)])}),
+                                                         (104, [400, 120, 0]), (119, [420, 100, 0])], feel),
+                                         "o": _animated([(0, 0), (8, 100), (104, 100), (119, 0)], feel)}),
                        "ao": 0, "ip": 0, "op": FRAMES, "st": 0, "bm": 0,
                        "t": {"d": {"k": [{"t": 0, "s": document}]}, "m": {"g": 1, "a": _static([0, 0])}, "a": []}})
         assets = []
@@ -363,6 +441,18 @@ def check_cutout(image: bytes) -> bytes:
     return out.getvalue()
 
 
+def dominant_color(image: bytes) -> str:
+    """The main color of the cut-out, so the drawn character keeps the reference's identity."""
+    from PIL import Image
+    picture = Image.open(io.BytesIO(image)).convert("RGBA")
+    picture.thumbnail((64, 64))
+    pixels = [p[:3] for p in picture.getdata() if p[3] > 128]
+    if not pixels:
+        return "#ffffff"
+    r, g, b = Counter(pixels).most_common(1)[0][0]
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
 def draft(cid: str, brief: dict, image: bytes, checkout: str) -> dict:
     """Make two Lottie scenes and a filmstrip for each. Nothing is saved for use yet."""
     status = checkout_status(checkout)
@@ -372,8 +462,9 @@ def draft(cid: str, brief: dict, image: bytes, checkout: str) -> dict:
     did = new_draft_id()
     folder = _draft_dir(cid, did)
     folder.mkdir(parents=True, exist_ok=True)
-    (folder / SOURCE_IMAGE).write_bytes(cutout)
-    scenes = {"action": build_lottie(brief, "action"), "character": build_lottie(brief, "character", SOURCE_IMAGE)}
+    # The uploaded cut-out is only a color and identity reference; the Lottie draws new poses itself.
+    brief = {**clean_brief(brief), "character_color": dominant_color(cutout)}
+    scenes = {"action": build_lottie(brief, "action"), "character": build_lottie(brief, "character")}
     frames_by_kind = {}
     try:
         for kind in KINDS:
@@ -381,7 +472,7 @@ def draft(cid: str, brief: dict, image: bytes, checkout: str) -> dict:
             scene.write_text(json.dumps(scenes[kind]), encoding="utf-8")
             out = folder / kind
             out.mkdir(exist_ok=True)
-            result = _run(status["checkout"], scene, out, folder / SOURCE_IMAGE if kind == "character" else None, False)
+            result = _run(status["checkout"], scene, out, None, False)
             frames = [f for f in result.get("frames") or [] if re.fullmatch(r"frame-\d{4}\.png", f)]
             if len(frames) < 6:
                 raise ValueError("The renderer did not make enough frames to show the motion.")
@@ -451,8 +542,7 @@ def approve(cid: str, did: str, checkout: str) -> dict:
         if not scene.is_file():
             raise ValueError("That motion draft has expired. Ask for it again.")
         scenes[kind] = json.loads(scene.read_text(encoding="utf-8"))
-        _run(status["checkout"], scene, folder / kind,
-             folder / SOURCE_IMAGE if kind == "character" else None, True)
+        _run(status["checkout"], scene, folder / kind, None, True)
     action_webm, character_webm = folder / "action" / "motion.webm", folder / "character" / "motion.webm"
     if not action_webm.is_file() or not character_webm.is_file():
         raise ValueError("The motion could not be encoded. Ask for it again.")

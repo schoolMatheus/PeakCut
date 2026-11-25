@@ -1603,7 +1603,7 @@ const peakcutPortuguese = {
   "Describe the action motion and the character motion separately. The AI draws both as Lottie animations and shows a filmstrip for each. Nothing is used in a clip until you approve both.": "Descreva separadamente o motion da ação e o do personagem. A IA desenha os dois como animações Lottie e mostra uma fitilha para cada. Nada é usado no clipe até você aprovar os dois.",
   "How should the action animation look?": "Como deve ser a animação da ação?",
   "Cut-out picture (transparent PNG)": "Imagem recortada (PNG transparente)",
-  "Send a PNG with the background removed. PeakCut will animate only the picture, with no background or box.": "Envie um PNG com o fundo removido. O PeakCut vai animar só a imagem, sem fundo e sem caixa.",
+  "Send a PNG with the background removed. PeakCut uses it as a colour and identity reference and draws six new poses of the character.": "Envie um PNG com o fundo removido. O PeakCut usa a imagem como referência de cor e identidade e desenha seis poses novas do personagem.",
   "What should the character do?": "O que o personagem deve fazer?",
   "Check both motions": "Confira os dois motions",
   "Motion of the action": "Motion da ação",

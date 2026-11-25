@@ -43,7 +43,7 @@ class MotionRules(unittest.TestCase):
             cm.clean_brief(brief(action="dance"))
 
     def test_a_chosen_palette_overrides_the_ai_colors(self):
-        palette = {"background": "#010203", "ink": "#fefefe", "accent": "#ffcc00"}
+        palette = {"background": "#010203", "ink": "#fefefe", "accent": "#ffcc00", "detail": "#00aaff"}
         answer = {"style": "Bold", "background": "#999999", "ink": "#111111", "accent": "#ff0000",
                   "image_action": "wave", "label": "INSCREVA-SE", "note": "Teste"}
         with patch("studio.ai.ready", return_value=True), \
@@ -69,11 +69,10 @@ class MotionRules(unittest.TestCase):
             self.assertFalse(any(expression(layer) for layer in doc["layers"]))
         self.assertEqual(action["assets"], [])
         self.assertIn(5, [l["ty"] for l in action["layers"]])       # the action's text
-        self.assertEqual(character["assets"][0]["p"], cm.SOURCE_IMAGE)
-        self.assertIn(2, [l["ty"] for l in character["layers"]])    # the cut-out picture
+        self.assertEqual(character["assets"], [])
+        self.assertNotIn(2, [l["ty"] for l in character["layers"]]) # the cut-out is not pasted in
+        self.assertEqual(sum(1 for l in character["layers"] if l["nm"].startswith("New drawing")), 6)
         self.assertNotIn(5, [l["ty"] for l in character["layers"]]) # no card, no label on the character
-        with self.assertRaises(ValueError):
-            cm.build_lottie(clean, "character")
 
     def test_ai_brief_is_asked_once_and_merged_with_the_form(self):
         answer = {"style": "Purple and bold", "background": "#241035", "ink": "#ffffff",
