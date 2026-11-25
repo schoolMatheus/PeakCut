@@ -26,6 +26,7 @@ from . import admin as admins
 from . import account, load
 from . import (accounts, ai, alerts, auth, brain, config, creators, ctx, db, jobs, live, media, posting,
                profiles, render, safe, subscription, claude_account, transcribe, usage)
+from . import interaction_styles as ist
 
 from . import tools as _tools  # noqa: E402
 
@@ -1368,6 +1369,113 @@ def creator_avatar(cid: str, p: str = ""):
     if not f.is_file() or prof.get("pic") not in ("image/jpeg", "image/png", "image/webp"):
         raise HTTPException(404)
     return FileResponse(f, media_type=prof["pic"], headers={"Cache-Control": "private, max-age=86400"})
+
+
+@app.get("/api/creators/{cid}/cover")
+def creator_cover(cid: str, p: str = ""):
+    """The channel cover, kept as a color reference for a custom interaction style. Never drawn on a clip."""
+    c = creators.get(cid)
+    if not c:
+        raise HTTPException(404)
+    key = p if p in creators.PLATFORMS else ist._platform(c)
+    prof = (c.get("profiles") or {}).get(key) or {}
+    f = creators.root(cid) / f"cover-{key}.img"
+    if not f.is_file() or prof.get("cover") not in ("image/jpeg", "image/png", "image/webp"):
+        raise HTTPException(404)
+    return FileResponse(f, media_type=prof["cover"], headers={"Cache-Control": "private, max-age=86400"})
+
+
+@app.post("/api/creators/{cid}/interaction-styles")
+def add_interaction_style(cid: str, body: dict = Body(...)):
+    _throttle("istedit:" + ctx.uid(), 90, 600)
+    try:
+        return creators.add_interaction_style(cid, body)
+    except KeyError:
+        raise HTTPException(404, "No such creator")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.put("/api/creators/{cid}/interaction-styles/{sid}")
+def edit_interaction_style(cid: str, sid: str, body: dict = Body(...)):
+    _throttle("istedit:" + ctx.uid(), 90, 600)
+    try:
+        return creators.update_interaction_style(cid, sid, body)
+    except KeyError:
+        raise HTTPException(404, "No such style")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.delete("/api/creators/{cid}/interaction-styles/{sid}")
+def remove_interaction_style(cid: str, sid: str):
+    _throttle("istedit:" + ctx.uid(), 90, 600)
+    try:
+        return creators.delete_interaction_style(cid, sid)
+    except KeyError:
+        raise HTTPException(404, "No such style")
+
+
+@app.put("/api/creators/{cid}/interaction-style")
+def choose_interaction_style(cid: str, body: dict = Body(...)):
+    """An empty id goes back to the built-in YouTube style."""
+    _throttle("istedit:" + ctx.uid(), 90, 600)
+    try:
+        return creators.select_interaction_style(cid, str(body.get("id") or ""))
+    except KeyError:
+        raise HTTPException(404, "No such style")
+
+
+@app.post("/api/creators/{cid}/interaction-style/suggest")
+def suggest_interaction_style(cid: str, body: dict = Body(default={})):
+    """One look at the channel's cover and avatar. Nothing is saved: 'another idea' asks again."""
+    c = creators.get(cid)
+    if not c:
+        raise HTTPException(404, "No such creator")
+    _throttle("istsuggest:" + ctx.uid(), 20, 600, "That's a lot of channel looks in a short time. Wait a few minutes.")
+    usage.set_context(cid, c.get("name") or "")
+    try:
+        return ist.suggest(c, ist.avatar_for(cid), ist.cover_for(cid), (body or {}).get("language", "en"))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception:  # noqa: BLE001 - a service that does not see pictures must not stop manual colors
+        raise HTTPException(422, "The AI could not read the channel art. Pick the colors by hand.")
+
+
+@app.get("/api/creators/{cid}/interaction-style/preview")
+def preview_interaction_style(request: Request, cid: str):
+    """A real frame of the motion in these colors, with the seal, for the person choosing a style."""
+    if not creators.get(cid):
+        raise HTTPException(404, "No such creator")
+    _throttle("istpreview:" + ctx.uid(), 120, 600)
+    q = request.query_params
+    draft = dict(ist.YOUTUBE)
+    for key in ("background", "ink", "accent", "detail"):
+        value = q.get(key) or ""
+        if re.fullmatch(r"#[0-9a-fA-F]{6}", value):
+            draft[key] = value
+    try:
+        style = ist.clean_style({**draft, "name": "Preview", "seal": q.get("seal") == "1",
+                                 "seal_name": q.get("name") or ""})
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    avatar = ist.avatar_for(cid) if style["seal"] else None
+    picture = hashlib.sha1(avatar).hexdigest()[:10] if avatar else ""
+    key = hashlib.sha1(json.dumps([style, picture, q.get("lang", "en")], sort_keys=True, default=str).encode()).hexdigest()[:24]
+    folder = creators.root(cid) / "style-previews"
+    f = folder / f"{key}.jpg"
+    if not f.is_file():
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+            tmp = folder / f"{key}.tmp"
+            tmp.write_bytes(ist.preview_jpeg(style, avatar, q.get("lang", "en")))
+            tmp.replace(f)
+            old = sorted(folder.glob("*.jpg"), key=lambda x: x.stat().st_mtime)
+            for extra in old[:-24]:
+                extra.unlink(missing_ok=True)
+        except (OSError, RuntimeError, ValueError) as e:
+            raise HTTPException(422, str(e) if isinstance(e, RuntimeError) else "The preview could not be made.")
+    return FileResponse(f, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=86400"})
 
 
 @app.get("/api/creators")

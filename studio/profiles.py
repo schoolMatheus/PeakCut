@@ -17,6 +17,7 @@ UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.3
       "Accept-Language": "en-US,en;q=0.9"}
 PIC_HOSTS = ("yt3.googleusercontent.com", "yt3.ggpht.com", "static-cdn.jtvnw.net", "files.kick.com")
 MAX_PIC = 600_000
+MAX_COVER = 1_400_000
 
 from concurrent.futures import ThreadPoolExecutor
 
@@ -43,16 +44,24 @@ def _meta(html: str, prop: str):
     return m.group(1).replace("&amp;", "&") if m else ""
 
 
-def _picture(url: str):
+def _picture(url: str, limit: int = MAX_PIC):
     """The picture as (bytes, type), only from the platforms' own image hosts."""
     u = urlparse(url or "")
     if u.scheme != "https" or (u.hostname or "") not in PIC_HOSTS:
         return None
-    ctype, data = _get(url, "image/*", MAX_PIC + 1)
+    ctype, data = _get(url, "image/*", limit + 1)
     ctype = ctype.split(";")[0].strip()
-    if ctype not in ("image/jpeg", "image/png", "image/webp") or len(data) > MAX_PIC:
+    if ctype not in ("image/jpeg", "image/png", "image/webp") or len(data) > limit:
         return None
     return data, ctype
+
+
+def _banner(html: str) -> str:
+    """The YouTube channel cover. It is only read as a color reference for a custom interaction style."""
+    m = re.search(r'"banner"\s*:\s*\{"imageBannerViewModel".{0,800}?"url"\s*:\s*"(https://yt3[^"\s]+)"', html)
+    if not m:
+        return ""
+    return m.group(1).replace("\\u0026", "&").replace("\\/", "/")
 
 
 def _short(n: int) -> str:
@@ -112,13 +121,20 @@ def _fetch(url: str, plat: str) -> dict:
         if plat == "YouTube":
             m = re.search(r'"content":"([\d.,]+[KMB]?) subscribers"', html) or re.search(r'([\d.,]+[KMB]?) subscribers', html)
             subs = f"{m.group(1)} subscribers" if m else ""
-        out = {"platform": plat, "name": name[:80], "followers": subs, "pic_url": _meta(html, "og:image")}
+        out = {"platform": plat, "name": name[:80], "followers": subs, "pic_url": _meta(html, "og:image"),
+               "cover_url": _banner(html) if plat == "YouTube" else ""}
     else:
         raise ValueError("Channel links must be from YouTube, Twitch or Kick.")
     try:
         out["pic"] = _picture(out.pop("pic_url"))
     except Exception:
         out["pic"] = None
+    cover_url = out.pop("cover_url", "")
+    if cover_url:
+        try:
+            out["cover"] = _picture(cover_url, MAX_COVER)
+        except Exception:
+            out["cover"] = None
     _cache[url] = (time.time(), out)
     if len(_cache) > 3000:
         _cache.pop(next(iter(_cache)))
@@ -301,8 +317,12 @@ def _profiles(cid, c, old, lives, force, now) -> dict:
                 pic = f.get("pic")
                 if pic:
                     (creators.root(cid) / f"avatar-{key_}.img").write_bytes(pic[0])
+                cover = f.get("cover")
+                if cover:
+                    (creators.root(cid) / f"cover-{key_}.img").write_bytes(cover[0])
                 p.update(platform=f["platform"], name=f["name"], followers=f["followers"],
-                         pic=pic[1] if pic else p.get("pic", ""), channel=url, at=now)
+                         pic=pic[1] if pic else p.get("pic", ""), cover=cover[1] if cover else p.get("cover", ""),
+                         channel=url, at=now)
         except Exception:
             p.setdefault("platform", platform_of(url))
             p.setdefault("channel", url)

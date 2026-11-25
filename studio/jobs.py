@@ -13,7 +13,7 @@ import traceback
 import uuid
 from pathlib import Path
 
-from . import accounts, brain, config, creators, ctx, facecam, fetch_model, games, hashtags, load, media, quality, render, roman, safe, transcribe, usage
+from . import accounts, brain, config, creators, ctx, facecam, fetch_model, games, hashtags, interaction_styles, load, media, quality, render, roman, safe, transcribe, usage
 
 class _FairQueue:
     """Whose video is next. Each person has their own line and the lines take turns, so someone who adds ten
@@ -123,6 +123,10 @@ def clean_options(options) -> dict:
     for k, v in (options if isinstance(options, dict) else {}).items():
         if k == "interactions":
             out[k] = creators.clean_interactions(v)
+            continue
+        if k == "interaction_style":
+            if v:
+                out[k] = interaction_styles.clean_snapshot(v)
             continue
         if k == "captions":
             if not isinstance(v, bool):
@@ -328,6 +332,9 @@ def create(source: dict, options: dict, enqueue=True, creator=None, kind="video"
     if not c or not c.get("lang"):
         base["lang"] = "pt" if settings["caption_language"] == "pt-BR" else "en"
     opts = {**base, **clean_options(options)}
+    # A new video takes a copy of the creator's current interaction style; an old job or template without one
+    # keeps the built-in YouTube look.
+    opts.setdefault("interaction_style", interaction_styles.for_creator(c))
     if opts["min_len"] >= opts["max_len"]:
         opts["min_len"] = max(5, opts["max_len"] - 5)
     job = {"id": jid, "user": ctx.uid(), "kind": kind, "creator": creator, "dir": str(d), "created": time.time(), "source": source,
@@ -459,6 +466,8 @@ def _render_changes(job, clip, changes):
     new = dict(clip)
     if "interactions" in changes:
         new.update(clean_options({"interactions": changes["interactions"]}))
+    if "interaction_style" in changes:
+        new.update(clean_options({"interaction_style": changes["interaction_style"]}))
     if "captions" in changes:
         new.update(clean_options({"captions": changes["captions"]}))
     if "segments" in changes:
@@ -554,11 +563,13 @@ def render_one(job, clip, words):
     save(job)
     try:
         language = clip.get("caption_language", job.get("caption_language", "en"))
+        style = clip.get("interaction_style") or {}
+        seal_avatar = interaction_styles.avatar_for(job.get("creator")) if style.get("seal") else None
         if clip.get("text_language", "en") != language and config.ai_ready():
             usage.set_context(job.get("creator"), job.get("title") or "")
             clip.update(brain.translate_clip_text(clip, language), text_language=language)
         if clip.get("segments"):
-            out = _render_sequence(job, clip, words)
+            out = _render_sequence(job, clip, words, seal_avatar=seal_avatar)
         else:
             if not clip.get("src") and not job.get("source_path"):
                 _piece_again(job, clip)
@@ -572,7 +583,7 @@ def render_one(job, clip, words):
             speech = [dict(w, s=w["s"] - off, e=w["e"] - off) for w in words
                       if w["e"] > clip["start"] and w["s"] < clip["end"]]
             out = render.render_clip(src, d / "clips", clip["id"], local, near, job["width"], job["height"],
-                                     speech_words=speech)
+                                     speech_words=speech, seal_avatar=seal_avatar)
         clip.update(out, status="done", version=clip.get("version", 0) + 1, error=None)
         post = {k: clip[k] for k in ("title", "description", "hashtags", "hook", "start", "end", "score")}
         if clip.get("segments"):
@@ -593,7 +604,7 @@ def render_one(job, clip, words):
     save(job)
 
 
-def _render_sequence(job, clip, words):
+def _render_sequence(job, clip, words, seal_avatar=None):
     src, low, high = editor_source(job, clip)
     url = editor_remote(job)
     d = Path(job["dir"])
@@ -627,7 +638,8 @@ def _render_sequence(job, clip, words):
         source = inputs[0][0]
         dimensions = job if job.get("width") and job.get("height") else media.probe(source)
         return render.render_clip(source, d / "clips", clip["id"], local, captions,
-                                  dimensions["width"], dimensions["height"], segments=inputs, speech_words=speech)
+                                  dimensions["width"], dimensions["height"], segments=inputs, speech_words=speech,
+                                  seal_avatar=seal_avatar)
 
 
 def _caption_words(job, clip, words, off):
@@ -1025,7 +1037,8 @@ def _run_job(job):
         for c in found:
             c.update(id=f"clip{len(job['clips']) + 1:02d}", start=round(c["start"] + shift, 2),
                      end=round(c["end"] + shift, 2), style=o["style"], layout=o["layout"],
-                     captions=o.get("captions", True), interactions=list(o.get("interactions", [])), status="queued", version=0,
+                     captions=o.get("captions", True), interactions=list(o.get("interactions", [])),
+                     interaction_style=o.get("interaction_style"), status="queued", version=0,
                      text_language=job.get("caption_language", "en"))
             if o.get("hook_text"):        # the person's own big text, on every clip, in place of the AI's
                 c["hook"], c["fixed_hook"] = o["hook_text"], True

@@ -243,6 +243,17 @@ label.ck input{accent-color:var(--brand);margin:0}
 .interaction-checks{display:flex;flex-wrap:wrap;gap:8px}
 .interaction-checks label.ck{height:auto;min-height:44px}
 .interaction-checks input:focus-visible{outline:2px solid var(--brand-deep);outline-offset:3px}
+.style-row{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-top:12px}
+.style-row .style-name{color:var(--dim);font-size:12px}
+.style-dlg{width:560px}
+.style-dlg .style-preview{display:block;width:100%;height:auto;border:1px solid var(--line-2);border-radius:var(--r);background:var(--muted)}
+.style-dlg .style-colors{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.style-dlg .style-colors label{font-size:12px;color:var(--dim);font-weight:600}
+.style-dlg .style-colors input[type=color]{width:100%;height:38px;padding:3px;border:1px solid var(--line-2);border-radius:var(--r);background:#fff;cursor:pointer}
+.style-dlg .style-art{display:flex;align-items:center;gap:10px}
+.style-dlg .style-art img{width:54px;height:54px;border-radius:10px;object-fit:cover;border:1px solid var(--line-2)}
+.style-dlg .style-note{margin:0}
+.style-dlg .dlg-foot{flex-wrap:wrap}
 .fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:18px}
 .span{grid-column:1/-1}
 .time-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 8px}
@@ -1544,11 +1555,151 @@ function drawAdd(variant) {
 }
 const LAYOUT_SHORT = {blur:i18n.t("Blurred fill"), zoom:i18n.t("Zoomed in"), crop:i18n.t("Fill screen"), left:i18n.t("Keep left"), right:i18n.t("Keep right"), fit:i18n.t("Full frame"), split:i18n.t("Two people"), gameplay:"Gameplay + facecam", facecam_top:i18n.t("Facecam on top")};
 const INTERACTION_LABELS = {subscribe:"Subscribe to the channel", like:"Like the video", comment:"Leave a comment", share:"Share the video", save:"Save the video"};
-function interactionOptions(selected) {
+function interactionOptions(selected, styleFor = "", withStyle = true) {
+  const row = withStyle ? `<div class="style-row">
+      <button type="button" class="btn sm" data-act="istyles" data-cid="${esc(styleFor)}">${ic("plus")}${i18n.html("Custom style")}</button>
+      <span class="help style-name" data-style-label data-cid="${esc(styleFor)}"></span></div>` : "";
   return `<fieldset class="interaction-options"><legend class="ot">${i18n.html("Audience interaction")}</legend>
     <p class="help">${i18n.html("Optional animated requests, one at a time, without covering captions.")}</p>
     <div class="interaction-checks">${Object.entries(INTERACTION_LABELS).map(([id, label]) =>
-      `<label class="ck"><input type="checkbox" data-interaction value="${id}"${selected.includes(id) ? " checked" : ""}>${i18n.html(label)}</label>`).join("")}</div></fieldset>`;
+      `<label class="ck"><input type="checkbox" data-interaction value="${id}"${selected.includes(id) ? " checked" : ""}>${i18n.html(label)}</label>`).join("")}</div>${row}</fieldset>`;
+}
+function styleChoice(cid) {
+  const c = cid && S.creators.find(x => x.id === cid);
+  const style = c && (c.interaction_styles || []).find(s => s.id === c.interaction_style);
+  return style ? style.name : i18n.t("YouTube (default)");
+}
+function updateStyleLabels() {
+  $$("[data-style-label]").forEach(el => {
+    el.textContent = styleChoice(el.dataset.cid || $("#o_creator")?.value || creatorId());
+  });
+}
+
+const STYLE_BASE = {background:"#0f0f0f", ink:"#ffffff", accent:"#fd0000", detail:"#ff4d4d"};
+function styleTarget(given) {
+  return given || $("#o_creator")?.value || creatorId() || "";
+}
+async function openInteractionStyles(given) {
+  const cid = styleTarget(given), c = S.creators.find(x => x.id === cid);
+  if (!c) return toast(i18n.t("Choose a creator first."), "bad");
+  const styles = c.interaction_styles || [], selected = c.interaction_style || "";
+  const dlg = $("#formdlg");
+  if (dlg.open) dlg.close();
+  dlg.onclose = null; dlg.returnValue = "";
+  const platform = (c.profiles && Object.keys(c.profiles).find(k => c.profiles[k]?.cover)) || "youtube";
+  const profile = c.profiles?.[platform] || c.profile || {};
+  const hasArt = !!(profile.pic || profile.cover || Object.values(c.profiles || {}).some(p => p && (p.pic || p.cover)));
+  const art = [
+    profile.cover ? `<img src="/api/creators/${encodeURIComponent(cid)}/cover?p=${esc(platform)}&v=${Math.round(profile.at || 0)}" alt="${esc(i18n.t("Channel cover"))}">` : "",
+    profile.pic ? `<img src="/api/creators/${encodeURIComponent(cid)}/avatar?p=${esc(platform)}&v=${Math.round(profile.at || 0)}" alt="${esc(i18n.t("Channel avatar"))}">` : ""
+  ].join("");
+  dlg.innerHTML = `<form class="dlg style-dlg" id="styleform">
+    <h2>${i18n.html("Interaction style")}</h2>
+    <p class="help style-note">${i18n.html("Custom styles change the colors of the audience motions and add the channel seal. Captions and the title keep their own colors. Only new clips change; clips already made stay as they are.")}</p>
+    <label class="f">${i18n.html("Style")}<select id="style_pick">
+      <option value="">${i18n.html("YouTube (default)")}</option>
+      ${styles.map(s => `<option value="${esc(s.id)}"${s.id === selected ? " selected" : ""}>${esc(s.name)}</option>`).join("")}
+      <option value="__new"${!selected ? " selected" : ""}>${i18n.html("New style")}</option>
+    </select></label>
+    <img class="style-preview" id="style_preview" alt="${esc(i18n.t("Preview"))}">
+    ${art ? `<div class="style-art">${art}</div>` : ""}
+    <p class="help style-note" id="style_why"></p>
+    <label class="f">${i18n.html("Style name")}<input id="style_name" maxlength="40" placeholder="${i18n.html("Give it a short name")}"></label>
+    <div class="style-colors">
+      ${[["background", "Background"], ["ink", "Text"], ["accent", "Highlight"], ["detail", "Detail"]].map(([k, label]) =>
+        `<label>${i18n.html(label)}<input type="color" id="style_${k}" value="${STYLE_BASE[k]}"></label>`).join("")}
+    </div>
+    <label class="sw"><input type="checkbox" id="style_seal" checked>${i18n.html("Channel seal")}<small>${i18n.html("The round avatar and the short channel name, placed in the free space beside the motion.")}</small></label>
+    <label class="f">${i18n.html("Short name on the seal")}<input id="style_sealname" maxlength="20"></label>
+    <p class="help style-note">${i18n.html("The channel cover is only a color reference. It never appears in the videos. You can also choose all the colors by hand, with no AI and no pictures.")}</p>
+    <div class="row" style="gap:8px;flex-wrap:wrap">
+      ${hasArt ? `<button type="button" class="btn sm" id="style_ai"${S.status.ai?.ready ? "" : " disabled"}>${ic("bolt")}${i18n.html("Read the channel art with AI")}</button>` : ""}
+      <button type="button" class="btn sm" id="style_youtube">${i18n.html("Start from YouTube")}</button>
+    </div>
+    <div class="dlg-foot">
+      <button type="button" class="btn danger" id="style_delete" hidden>${i18n.html("Delete style")}</button>
+      <button type="button" class="btn" id="style_cancel">${i18n.html("Cancel")}</button>
+      <button type="button" class="btn primary" id="style_save">${i18n.html("Save style")}</button>
+    </div>
+  </form>`;
+  const s = q => dlg.querySelector(q);
+  const fallbackName = c.profile?.name || c.name || "";
+  const draft = () => ({name:s("#style_name").value.trim(), background:s("#style_background").value,
+    ink:s("#style_ink").value, accent:s("#style_accent").value, detail:s("#style_detail").value,
+    seal:s("#style_seal").checked, seal_name:s("#style_sealname").value.trim()});
+  const fill = x => {
+    s("#style_name").value = x.name || "";
+    for (const k of ["background", "ink", "accent", "detail"]) s(`#style_${k}`).value = x[k] || STYLE_BASE[k];
+    s("#style_seal").checked = !!x.seal;
+    s("#style_sealname").value = x.seal_name || "";
+  };
+  let previewAt = 0, timer = 0, deleteArmed = "";
+  const refresh = () => {
+    const picked = s("#style_pick").value, isYouTube = picked === "";
+    for (const q of ["#style_name", "#style_background", "#style_ink", "#style_accent", "#style_detail",
+                     "#style_seal", "#style_sealname"]) s(q).disabled = isYouTube;
+    s("#style_save").disabled = isYouTube;
+    s("#style_delete").hidden = isYouTube || picked === "__new";
+    const d = isYouTube ? {...STYLE_BASE, seal:false, seal_name:""} : draft();
+    const q = new URLSearchParams({background:d.background, ink:d.ink, accent:d.accent, detail:d.detail,
+      seal:d.seal ? "1" : "0", name:d.seal_name || "", lang:S.status.caption_language || "en", r:String(++previewAt)});
+    s("#style_preview").src = `/api/creators/${encodeURIComponent(cid)}/interaction-style/preview?${q}`;
+  };
+  s("#style_pick").addEventListener("change", () => {
+    const picked = s("#style_pick").value;
+    if (picked === "__new") fill({...STYLE_BASE, seal:true, seal_name:fallbackName});
+    else if (picked) fill(styles.find(x => x.id === picked) || {...STYLE_BASE, seal:true, seal_name:fallbackName});
+    else fill({...STYLE_BASE, seal:false, seal_name:""});
+    s("#style_why").textContent = "";
+    refresh();
+  });
+  dlg.querySelectorAll("#styleform input").forEach(i => i.addEventListener("input", () => {
+    clearTimeout(timer); timer = setTimeout(refresh, 250);
+  }));
+  s("#styleform").addEventListener("submit", e => e.preventDefault());
+  s("#style_cancel").addEventListener("click", () => dlg.close());
+  s("#style_youtube").addEventListener("click", () => {
+    s("#style_pick").value = "__new"; fill({...STYLE_BASE, seal:true, seal_name:fallbackName});
+    s("#style_why").textContent = ""; refresh();
+  });
+  if (s("#style_ai")) s("#style_ai").addEventListener("click", async e => {
+    const button = e.currentTarget, label = button.textContent;
+    button.disabled = true; button.textContent = i18n.t("Reading the channel art…");
+    try {
+      const idea = await send(`/api/creators/${cid}/interaction-style/suggest`, {language:S.status.caption_language || "en"});
+      if (s("#style_pick").value === "") s("#style_pick").value = "__new";
+      fill(idea); s("#style_why").textContent = idea.why || ""; refresh();
+    } catch (err) { toast(err.message, "bad"); }
+    finally { button.textContent = label; button.disabled = false; }
+  });
+  s("#style_save").addEventListener("click", async e => {
+    const picked = s("#style_pick").value, button = e.currentTarget;
+    if (!picked || !s("#style_name").value.trim()) return toast(i18n.t("Give the style a name."), "bad");
+    button.disabled = true;
+    try {
+      if (picked === "__new") await send(`/api/creators/${cid}/interaction-styles`, draft());
+      else await send(`/api/creators/${cid}/interaction-styles/${picked}`, draft(), "PUT");
+      dlg.close(); await tick(); updateStyleLabels(); toast(i18n.t("Saved. New clips use this style."), "ok");
+    } catch (err) { toast(err.message, "bad"); button.disabled = false; }
+  });
+  s("#style_delete").addEventListener("click", async e => {
+    const picked = s("#style_pick").value, button = e.currentTarget;
+    if (!picked || picked === "__new") return;
+    if (deleteArmed !== picked) {
+      deleteArmed = picked; button.textContent = i18n.t("Click again to delete");
+      setTimeout(() => { if (deleteArmed === picked) { deleteArmed = ""; button.textContent = i18n.t("Delete style"); } }, 4000);
+      return;
+    }
+    button.disabled = true;
+    try {
+      await api(`/api/creators/${cid}/interaction-styles/${picked}`, {method:"DELETE"});
+      dlg.close(); await tick(); updateStyleLabels(); toast(i18n.t("Style deleted"), "ok");
+    } catch (err) { toast(err.message, "bad"); button.disabled = false; }
+  });
+  fill(selected ? (styles.find(x => x.id === selected) || {...STYLE_BASE, seal:true, seal_name:fallbackName})
+                : {...STYLE_BASE, seal:false, seal_name:""});
+  refresh();
+  dlg.showModal();
 }
 const speechLangs = () => S.status.speech || {en:{label:"English", state:"ready", size_mb:0}};
 const langName = k => i18n.t(speechLangs()[k]?.label || k);
@@ -2269,7 +2420,7 @@ function drawCreatorForm() {
       <div class="fields"><label class="sw span"><input type="checkbox" data-k="captions" data-caption-toggle ${c.captions === false ? "" : "checked"}>${i18n.html("Generate captions")}</label>
         <label class="f">${i18n.html("Caption style")}<select data-k="style" data-caption-style ${c.captions === false ? "disabled" : ""}>${opts(S.status.styles, c.style)}</select></label>
         <label class="f">Layout<select data-k="layout">${opts(S.status.layouts, c.layout)}</select></label>
-        <div class="span">${interactionOptions(c.interactions || [])}</div>
+        <div class="span">${interactionOptions(c.interactions || [], c.id)}</div>
         <label class="f">${i18n.html("Game")}<input data-k="game" value="${esc(c.game || "")}" placeholder="${i18n.html("Read from the title")}"><small class="sub" style="font-weight:400">${i18n.html("Left empty, the game is read from the stream's title. Set it for a streamer whose title says nothing: GTA 6, Fortnite, Elden Ring.")}</small></label>
         <label class="f">${i18n.html("Shortest clip (seconds)")}<input data-k="min_len" type="number" value="${c.min_len}"></label>
         <label class="f">${i18n.html("Longest clip (seconds)")}<input data-k="max_len" type="number" value="${c.max_len}"></label>
@@ -3290,7 +3441,7 @@ function drawClipEditor(full) {
             <label class="sw"><input type="checkbox" data-f="captions" data-caption-toggle ${c.captions === false ? "" : "checked"}>${i18n.html("Generate captions")}</label>
             <div class="two"><label class="f">${i18n.html("Caption style")}<select data-f="style" data-caption-style ${c.captions === false ? "disabled" : ""}>${opts(S.status.styles, c.style)}</select></label>
               <label class="f">${i18n.html("Layout")}<select data-f="layout">${opts(S.status.layouts, c.layout)}</select></label></div>
-            ${interactionOptions(c.interactions || [])}
+            ${interactionOptions(c.interactions || [], "", false)}
             <label class="f">${i18n.html("Title")}<input data-f="title" value="${esc(c.title)}"></label>
             <label class="f">${i18n.html("Description")}<textarea data-f="description" rows="2">${esc(c.description)}</textarea></label>
             <label class="f">${i18n.html("Hashtags")}<input data-f="hashtags" value="${esc((c.hashtags || []).join(" "))}"></label>
@@ -3365,6 +3516,7 @@ function render() {
   if ($("#ctimeline")) drawTimeline();
   if (S.view === "editor") drawEditorPage();
   else if (D.jid) drawClipEditor(false);
+  updateStyleLabels();
 }
 async function tick() {
   try {
@@ -3472,6 +3624,7 @@ document.addEventListener("change", async e => {
     const hk = $("#o_hook"); if (hk && !hk.dataset.typed) hk.value = c?.hook_text || "";      // the creator's own text, unless one was typed here
     const ds = $("#o_desc"); if (ds && !ds.dataset.typed) ds.value = c?.description_text || "";
     if ($("#o_lang") && !$("#o_lang").dataset.typed) $("#o_lang").value = c?.lang || "en";
+    updateStyleLabels();
     return;
   }
   if (["o_hook", "o_desc", "o_lang"].includes(t.id)) { t.dataset.typed = "1"; rememberClipOptions(); }
@@ -3663,6 +3816,7 @@ document.addEventListener("click", async e => {
     if (a === "collapse") { const m = $("#app").classList.toggle("mini"); try { localStorage.setItem("mini", m ? "1" : ""); } catch {} return; }
     if (a === "toggleopts") { const p = $(".composer-opts"), open = !p.classList.contains("open"); p.classList.toggle("open", open); p.inert = !open; b.classList.toggle("on", open); b.setAttribute("aria-expanded", String(open)); return; }
     if (a === "template-save") return saveClipTemplate();
+    if (a === "istyles") return openInteractionStyles(d.cid);
     if (a.startsWith("template-")) {
       const id = b.closest("details").dataset.template;
       const custom = S.clipTemplates?.find(t => t.id === id);

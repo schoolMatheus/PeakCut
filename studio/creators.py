@@ -23,7 +23,7 @@ DEFAULTS = {"name": "", "channel": "", "style": "bounce", "layout": "blur", "cap
             "post_window_enabled": False, "post_start_time": "09:00", "post_end_time": "21:00",
             "post_windows": [], "post_fixed_times": [],
             "privacy": "public", "post_footer": "", "rate_per_1k": 0.0, "channels": {},
-            "lang": "en", "interactions": []}
+            "lang": "en", "interactions": [], "interaction_styles": [], "interaction_style": ""}
 PLATFORMS = ("youtube", "twitch", "kick")
 
 
@@ -66,6 +66,9 @@ def _fix(c: dict) -> dict:
         c["ai_every_min"] = 3       # "Auto" (0) is gone: jumps in loudness and chat are now always checked
     if c.get("channel") not in ch.values():
         c["channel"] = next((ch[k] for k in PLATFORMS if k in ch), "")
+    ids = {s.get("id") for s in c.get("interaction_styles") or []}
+    if c.get("interaction_style") not in ids:
+        c["interaction_style"] = ""      # the chosen style was deleted, or came from an older page: YouTube again
     return c
 NUMERIC = {"min_len": (5, 120), "max_len": (10, 180), "max_clips": (1, 20), "min_score": (0, 100), "buffer_min": (5, 120), "live_per_hour": (1, 60), "ai_every_min": (1, 30), "auto_jump_pct": (20, 300), "must_clip_min": (0, 240), "min_gap_min": (0, 60),
            "post_min_score": (0, 100), "post_gap_min": (5, 1440), "daily_cap": (1, 50)}
@@ -119,6 +122,18 @@ def _clean(data: dict) -> dict:
         if k == "interactions":
             if k in data:
                 out[k] = clean_interactions(data[k])
+            continue
+        if k == "interaction_styles":
+            if k in data:
+                from . import interaction_styles
+                out[k] = interaction_styles.clean_styles(data[k])
+            continue
+        if k == "interaction_style":
+            if k in data:
+                v = data[k]
+                if not isinstance(v, str) or (v and not re.fullmatch(r"[a-z0-9][a-z0-9\-]{2,23}", v)):
+                    raise ValueError("That interaction style isn't valid.")
+                out[k] = v
             continue
         if k == "post_windows":
             if k in data:
@@ -269,6 +284,69 @@ def update(cid, data: dict) -> dict:
     if c["min_len"] >= c["max_len"]:
         raise ValueError("Shortest clip must be shorter than longest clip.")
     _write(c)
+    return c
+
+
+def add_interaction_style(cid, data: dict) -> dict:
+    """Save a new custom style and choose it for the creator's next videos."""
+    from . import interaction_styles
+    with _lock:
+        c = get(cid)
+        if not c:
+            raise KeyError(cid)
+        styles = list(c.get("interaction_styles") or [])
+        if len(styles) >= interaction_styles.MAX_STYLES:
+            raise ValueError(f"You can keep up to {interaction_styles.MAX_STYLES} custom styles. Delete one first.")
+        style = interaction_styles.clean_style(data)
+        while any(s.get("id") == style["id"] for s in styles):
+            style["id"] = interaction_styles._style_id()
+        c["interaction_styles"] = [*styles, style]
+        c["interaction_style"] = style["id"]
+        _write(c)
+    return c
+
+
+def update_interaction_style(cid, sid: str, data: dict) -> dict:
+    """Change one saved style. Videos already made keep the copy they were made with."""
+    from . import interaction_styles
+    with _lock:
+        c = get(cid)
+        if not c:
+            raise KeyError(cid)
+        styles = list(c.get("interaction_styles") or [])
+        if not any(s.get("id") == sid for s in styles):
+            raise KeyError(sid)
+        style = interaction_styles.clean_style({**data, "id": sid}, sid=sid)
+        c["interaction_styles"] = [style if s.get("id") == sid else s for s in styles]
+        _write(c)
+    return c
+
+
+def delete_interaction_style(cid, sid: str) -> dict:
+    with _lock:
+        c = get(cid)
+        if not c:
+            raise KeyError(cid)
+        styles = [s for s in c.get("interaction_styles") or [] if s.get("id") != sid]
+        if len(styles) == len(c.get("interaction_styles") or []):
+            raise KeyError(sid)
+        c["interaction_styles"] = styles
+        if c.get("interaction_style") == sid:
+            c["interaction_style"] = ""      # back to the built-in YouTube look
+        _write(c)
+    return c
+
+
+def select_interaction_style(cid, sid: str) -> dict:
+    with _lock:
+        c = get(cid)
+        if not c:
+            raise KeyError(cid)
+        ids = {s.get("id") for s in c.get("interaction_styles") or []}
+        if sid and sid not in ids:
+            raise KeyError(sid)
+        c["interaction_style"] = sid or ""
+        _write(c)
     return c
 
 

@@ -299,7 +299,7 @@ RENDER_SECONDS = 600      # one clip's video encode; far beyond normal, so a fro
 
 
 def render_clip(src: Path, out_dir: Path, name: str, clip: dict, words: list, src_w: int, src_h: int, *, segments=None,
-                speech_words=None) -> dict:
+                speech_words=None, seal_avatar: bytes | None = None) -> dict:
     """Writes <name>.mp4, <name>.jpg and <name>.ass into out_dir. Returns file names."""
     out_dir.mkdir(parents=True, exist_ok=True)
     start, end = clip["start"], clip["end"]
@@ -320,6 +320,7 @@ def render_clip(src: Path, out_dir: Path, name: str, clip: dict, words: list, sr
     motions = interactions.plan(clip.get("interactions"), end - start, hook_y, cap_y,
                                 clip.get("caption_language", clip.get("text_language", "en")),
                                 caption_style=clip.get("style", "bounce"))
+    style = clip.get("interaction_style")
     if motions:
         cap_y = motions[0]["caption_y"]
     ass = build_ass(words if clip.get("captions", True) else [], start, end, hook, clip.get("style", "bounce"),
@@ -334,8 +335,10 @@ def render_clip(src: Path, out_dir: Path, name: str, clip: dict, words: list, sr
         meta = {"title": clip.get("title") or "", "description": clip.get("description") or "", "comment": clip.get("description") or ""}
         if segments:
             return _render_in(work, src, out_dir, name, start, end, layout, fg_h, ass, face=face,
-                              sequence=(segments, src_w, src_h), mute=mute, meta=meta, motions=motions)
-        return _render_in(work, src, out_dir, name, start, end, layout, fg_h, ass, face=face, mute=mute, meta=meta, motions=motions)
+                              sequence=(segments, src_w, src_h), mute=mute, meta=meta, motions=motions,
+                              style=style, seal_avatar=seal_avatar)
+        return _render_in(work, src, out_dir, name, start, end, layout, fg_h, ass, face=face, mute=mute, meta=meta, motions=motions,
+                          style=style, seal_avatar=seal_avatar)
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
@@ -358,7 +361,7 @@ def _join_segments(segments, width, height):
 
 
 def _render_in(work: Path, src: Path, out_dir: Path, name: str, start, end, layout, fg_h, ass: str, face=None,
-               sequence=None, mute=None, meta=None, motions=None) -> dict:
+               sequence=None, mute=None, meta=None, motions=None, style=None, seal_avatar=None) -> dict:
     global _qsv_ok
     (work / f"{name}.ass").write_text(ass, encoding="utf-8")
     (work / "f").mkdir()
@@ -379,7 +382,8 @@ def _render_in(work: Path, src: Path, out_dir: Path, name: str, start, end, layo
     if motions:
         if not sequence:
             fc += f";[0:a:0]{sound_filter}[normalized]"
-        extra_inputs, motion_filters = interactions.compose(work, motions, len(sequence[0]) if sequence else 1, end - start)
+        extra_inputs, motion_filters = interactions.compose(work, motions, len(sequence[0]) if sequence else 1, end - start,
+                                                            style=style, seal_avatar=seal_avatar)
         base += extra_inputs
         fc += ";" + motion_filters
         video = "[motion_v]"
