@@ -452,6 +452,8 @@ img.av{object-fit:cover}
 .lay-prev.fit .ph{background:#000}.lay-prev.fit .ph::before{display:none}
 .lay-prev.split .ph i{top:0;height:23px;transform:none}
 .lay-prev.split .ph::before{inset:25px 0 0 0;filter:none;opacity:1;background:linear-gradient(135deg,#FFB27A,#FF8B33)}
+.lay-prev.facecam_top .ph i{top:0;height:18px;transform:none;background:linear-gradient(135deg,#FFD2A8,#FF9A4D)}
+.lay-prev.facecam_top .ph::before{inset:20px 0 0 0;filter:none;opacity:1;background:linear-gradient(160deg,#B4643A,#5E3A2A)}
 .seg{display:flex;gap:4px;background:#fff;border-radius:10px;padding:4px}
 .composer.compact .seg{background:var(--muted)}
 .seg button{flex:1;display:flex;flex-direction:column;align-items:center;gap:1px;padding:5px 4px;border:2px solid transparent;border-radius:7px;background:transparent;color:var(--dim);font-size:13px;font-weight:600;cursor:pointer;transition:background-color .15s ease,border-color .15s ease,color .15s ease}
@@ -1540,7 +1542,7 @@ function drawAdd(variant) {
   drawClipTemplates();
   drawAtt();
 }
-const LAYOUT_SHORT = {blur:i18n.t("Blurred fill"), zoom:i18n.t("Zoomed in"), crop:i18n.t("Fill screen"), left:i18n.t("Keep left"), right:i18n.t("Keep right"), fit:i18n.t("Full frame"), split:i18n.t("Two people"), gameplay:"Gameplay + facecam"};
+const LAYOUT_SHORT = {blur:i18n.t("Blurred fill"), zoom:i18n.t("Zoomed in"), crop:i18n.t("Fill screen"), left:i18n.t("Keep left"), right:i18n.t("Keep right"), fit:i18n.t("Full frame"), split:i18n.t("Two people"), gameplay:"Gameplay + facecam", facecam_top:i18n.t("Facecam on top")};
 const INTERACTION_LABELS = {subscribe:"Subscribe to the channel", like:"Like the video", comment:"Leave a comment", share:"Share the video", save:"Save the video"};
 function interactionOptions(selected) {
   return `<fieldset class="interaction-options"><legend class="ot">${i18n.html("Audience interaction")}</legend>

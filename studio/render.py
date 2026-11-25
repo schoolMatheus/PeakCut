@@ -81,7 +81,8 @@ def install_fonts():
 LAYOUTS = {"blur": "Full frame + blurred fill", "zoom": "Zoomed in + blurred fill", "crop": "Fill the screen (centre crop)",
            "left": "Fill the screen, keep the left side", "right": "Fill the screen, keep the right side",
            "fit": "Full frame on black", "split": "Split screen: left half on top, right half below (two people)",
-           "gameplay": "Gameplay fills the screen, facecam in the corner"}
+           "gameplay": "Gameplay fills the screen, facecam in the corner",
+           "facecam_top": "Facecam on top, the whole game below"}
 _FILLS = ("crop", "left", "right", "gameplay")      # layouts where the picture covers the whole frame
 
 
@@ -127,6 +128,8 @@ def geometry(src_w, src_h, layout):
     top = (H - fg_h) // 2
     if layout in _FILLS:
         return layout, fg_h, 300, 1380
+    if layout == "facecam_top":
+        return layout, fg_h, H // 2 + 120, 1640   # heading just under the seam, captions low over the game
     if layout == "split":
         return layout, fg_h, 230, H // 2        # captions sit on the line between the two people
     return layout, fg_h, max(230, top - 190), min(1640, top + fg_h + 180)
@@ -241,6 +244,18 @@ PIP_MARGIN = 26
 
 
 def _filter(layout, fg_h, facecam=None, source="0:v"):
+    if layout == "facecam_top" and facecam:
+        # The webcam sits in the top half and the whole game fills the bottom half, so a viewer sees
+        # the face and the play at once without either covering the other.
+        fx, fy, fw, fh = (int(v) for v in facecam)
+        if fw > 8 and fh > 8:
+            half = H // 2
+            return (f"[{source}]fps={config.OUT_FPS},split=2[base][fc];"
+                    f"[base]scale={W}:{half}:force_original_aspect_ratio=decrease,"
+                    f"pad={W}:{half}:(ow-iw)/2:(oh-ih)/2:black,setsar=1[b];"
+                    f"[fc]crop={fw}:{fh}:{fx}:{fy},scale={W}:{half}:force_original_aspect_ratio=increase,"
+                    f"crop={W}:{half},setsar=1[p];"
+                    f"[p][b]vstack,setsar=1[v0];")
     if layout == "gameplay" and facecam:
         # The game fills the screen, and the webcam sits in the top corner of it, so a viewer sees
         # the play and the face at the same time.
@@ -299,7 +314,7 @@ def render_clip(src: Path, out_dir: Path, name: str, clip: dict, words: list, sr
         hook = censorship.mask_text(hook, listed)
     layout, fg_h, hook_y, cap_y = geometry(src_w, src_h, clip.get("layout", "blur"))
     face = clip.get("facecam")
-    if layout == "gameplay" and not (face and len(face) == 4):
+    if layout in ("gameplay", "facecam_top") and not (face and len(face) == 4):
         layout = "crop"     # no webcam found: the game fills the screen, which is still the right shape
     hook_y = _hook_y(layout, hook_y, face)
     motions = interactions.plan(clip.get("interactions"), end - start, hook_y, cap_y,
