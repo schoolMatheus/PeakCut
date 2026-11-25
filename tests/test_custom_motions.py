@@ -67,11 +67,19 @@ class MotionRules(unittest.TestCase):
         answer = {"style": "Purple and bold", "background": "#241035", "ink": "#ffffff",
                   "accent": "#ffcf3f", "image_action": "laugh", "label": "INSCREVA-SE", "note": "Alegre"}
         with patch("studio.ai.ready", return_value=True), \
-                patch("studio.brain.ask_ai", return_value=(json.dumps(answer), "model", 20)) as ask:
+                patch("studio.brain.ask_ai", return_value=(answer, "model", 20)) as ask:
             got = cm.ask_brief(brief(description="um personagem roxo", image_prompt="acenar tchau"))
         self.assertEqual(ask.call_count, 1)
         self.assertEqual(got["image_action"], "laugh")
         self.assertIn("purple", ask.call_args.args[0].lower())
+        # Providers that wrap the schema answer in "items" must work too.
+        with patch("studio.ai.ready", return_value=True), \
+                patch("studio.brain.ask_ai", return_value=({"items": answer}, "model", 20)):
+            self.assertEqual(cm.ask_brief(brief())["accent"], answer["accent"])
+        # Plain text answers from a model are still accepted.
+        with patch("studio.ai.ready", return_value=True), \
+                patch("studio.brain.ask_ai", return_value=(f"Sure!\n```json\n{json.dumps(answer)}\n```", "model", 20)):
+            self.assertEqual(cm.ask_brief(brief())["style"], answer["style"])
         with patch("studio.ai.ready", return_value=False):
             with self.assertRaises(ValueError):
                 cm.ask_brief(brief())

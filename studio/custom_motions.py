@@ -102,16 +102,20 @@ def clean_brief(value) -> dict:
             "has_image": has_image, "language": language}
 
 
-def _answer(text: str) -> dict:
-    """The JSON object inside an answer, even when the model wrapped it in a sentence or a code fence."""
-    raw = str(text or "").strip()
-    start, end = raw.find("{"), raw.rfind("}")
-    if start < 0 or end <= start:
-        raise ValueError("The AI did not send a motion it could use.")
-    try:
-        got = json.loads(raw[start:end + 1])
-    except ValueError:
-        raise ValueError("The AI did not send a motion it could use.")
+def _answer(value) -> dict:
+    """The AI's brief, whether the provider already parsed the JSON or left it as text."""
+    got = value
+    if not isinstance(got, dict):
+        raw = str(value or "").strip()
+        start, end = raw.find("{"), raw.rfind("}")
+        if start < 0 or end <= start:
+            raise ValueError("The AI did not send a motion it could use.")
+        try:
+            got = json.loads(raw[start:end + 1])
+        except ValueError:
+            raise ValueError("The AI did not send a motion it could use.")
+    if isinstance(got, dict) and isinstance(got.get("items"), dict):
+        got = got["items"]      # some providers wrap the object in the schema's "items" key
     if not isinstance(got, dict):
         raise ValueError("The AI did not send a motion it could use.")
     return got

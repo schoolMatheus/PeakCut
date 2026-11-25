@@ -1733,7 +1733,7 @@ async function openCustomMotion(given) {
     <label class="f">${i18n.html("Audience request")}<select id="cm_action">${Object.keys(INTERACTION_LABELS).map(a =>
       `<option value="${a}">${esc(i18n.t(INTERACTION_LABELS[a]))}</option>`).join("")}</select></label>
     <label class="f">${i18n.html("Motion name")}<input id="cm_name" maxlength="40" placeholder="${i18n.html("Give it a short name")}"></label>
-    <label class="f">${i18n.html("How should it look?")}<textarea id="cm_desc" rows="3" maxlength="600" placeholder="${i18n.html("For example: a playful purple character, bold letters, quick and cheerful")}"></textarea></label>
+    <label class="f">${i18n.html("How should the motion look?")}<textarea id="cm_desc" rows="3" maxlength="600" placeholder="${i18n.html("For example: quick and cheerful, bold purple letters, a little bouncing star")}"></textarea></label>
     <label class="sw"><input type="checkbox" id="cm_has_image">${i18n.html("I have a picture to animate")}</label>
     <div id="cm_image_box" hidden>
       <label class="f">${i18n.html("Picture")}<input type="file" id="cm_image" accept="image/png,image/jpeg,image/webp"></label>
