@@ -47,23 +47,34 @@ MOTION_SCHEMA = {
     "required": ["style", "background", "ink", "accent", "image_action", "label", "note"],
 }
 
-PROMPT = """You are the art director for a short animated card that appears in a vertical video. The card asks the
-viewer to {action}. It is 800x240, transparent, 4 seconds at 30 fps, and plays silently with a woosh and a click.
+PROMPT = """You are the art director for two short motions that will play together in a vertical video. Both are 800x240,
+transparent, 4 seconds at 30 fps, with a woosh and a click on their entrance.
 
-The person described what they want:
+Motion 1 asks the viewer to {action}: a simple card with a short label, one accent and a confirmation.
+Motion 2 is the character motion. It must be a series of NEW images, not one picture merely moved around: imagine
+at least six distinct drawings of the same cut-out character, one for each beat, with the expression and pose
+described by the person (waving, laughing with closed eyes, crying with tears, jumping, and so on). The uploaded
+cut-out is the reference for the character's identity and colors; each beat redraws that character in the new
+state. Show the character alone, with no card, no box, no shadow and no background.
+
+The person's description of the action motion:
 {brief}
 
+The person's description of the character motion:
 {image_line}
 
 Answer with one JSON object and nothing else:
-{{"style":"one short sentence about the visual direction","background":"#rrggbb","ink":"#rrggbb",
-  "accent":"#rrggbb","image_action":"one of wave, jump, spin, enter, pop, cry, laugh","label":"short call to action, at most 22 characters","note":"one short sentence in {language} explaining your choice"}}
+{{"style":"one short sentence about the card's visual direction","background":"#rrggbb","ink":"#rrggbb",
+  "accent":"#rrggbb","image_action":"one of wave, jump, spin, enter, pop, cry, laugh","label":"short call to action, at most 22 characters","note":"one short sentence in {language} explaining both choices"}}
+
+{palette_line}
 
 Rules:
 - background is a dark color for the card, ink is readable text on it, accent is the one bright highlight.
-- image_action is how the uploaded picture should move. If there is no picture, use pop.
+- image_action is how the cut-out picture should move:
   wave = friendly side-to-side greeting; jump = excited bounce; spin = playful full turn; enter = slides in from the side;
   pop = grows and settles; cry = sinks and wobbles; laugh = bounces with a happy wobble.
+- The character motion must contain only the picture. Never add a card, a box, a shadow or a background to it.
 - Keep the card readable when shown small over a video. One focal subject, one accent, no clutter.
 - Never describe or copy a logo, a face or a person's identity in the label."""
 
@@ -127,19 +138,28 @@ def ask_brief(value: dict) -> dict:
     if not ai.ready():
         raise ValueError("The AI is not set up yet. Add a key in Settings first.")
     brief = clean_brief(value)
-    description = " ".join([brief["style"], _text(value.get("description"), 600),
-                            _text(value.get("image_prompt"), 300)]).strip()
+    description = " ".join([brief["style"], _text(value.get("action_description"), 600)]).strip()
     if not description:
-        description = "A short, friendly animation for this audience request."
-    image_line = ("The person uploaded a picture; on the right is what it should do: "
-                  + (_text(value.get("image_prompt"), 300) or "a friendly greeting.")) if brief["has_image"] else \
-                 "No picture was uploaded: use vector shapes only."
+        description = "A short, friendly card for this audience request."
+    image_line = _text(value.get("image_prompt"), 300) or "a friendly greeting."
+    palette = value.get("palette_colors")
+    if palette:
+        palette_line = ("Use exactly these colors for the card: background " + palette["background"]
+                        + ", ink " + palette["ink"] + ", accent " + palette["accent"]
+                        + ". Do not choose different ones.")
+    else:
+        palette_line = "Choose the three colors yourself, following the description."
     spoken = "Brazilian Portuguese" if brief["language"] == "pt-BR" else "English"
-    prompt = PROMPT.format(action=brief["action"], brief=description, image_line=image_line, language=spoken)
+    prompt = PROMPT.format(action=brief["action"], brief=description, image_line=image_line,
+                           language=spoken, palette_line=palette_line)
     got, _model, _tokens = brain.ask_ai(prompt, MOTION_SCHEMA, purpose="Interaction motion: brief", timeout=120)
     parsed = _answer(got)
     merged = {**brief, **{k: parsed.get(k) for k in ("style", "background", "ink", "accent",
                                                      "image_action", "label", "note")}}
+    if palette:
+        # A chosen palette wins: the AI may only decide the drawing and the words.
+        for key in ("background", "ink", "accent"):
+            merged[key] = palette[key]
     return clean_brief(merged)
 
 
@@ -208,8 +228,13 @@ def _motion_for(behavior):
                             (54, [100, 100, 100]), (119, [100, 100, 100])])}
 
 
-def build_lottie(brief: dict, image_name: str = "") -> dict:
-    """A deterministic, Skottie-safe scene built from the brief. No expressions, no external assets."""
+def build_lottie(brief: dict, kind: str, image_name: str = "") -> dict:
+    """One of two Skottie-safe scenes: the action card, or the cut-out picture on its own.
+
+    Both share the same canvas and timing, so they can be overlaid into one WebM after approval. No expressions,
+    no external assets, and no background baked into the character scene."""
+    if kind not in ("action", "character"):
+        raise ValueError("That motion part isn't valid.")
     brief = clean_brief(brief)
     bg, ink, accent = brief["background"], brief["ink"], brief["accent"]
     layers = []
@@ -221,39 +246,40 @@ def build_lottie(brief: dict, image_name: str = "") -> dict:
                        "ks": _transform(ks), "ao": 0, "shapes": shapes, "ip": ip, "op": op, "st": 0, "bm": 0})
         next_index += 1
 
-    asset_id = "picture" if image_name else ""
-    add("Card", [_rect(410, 120, 640, 124, 24), _fill(bg)], 0, FRAMES,
-        {"a": _static([400, 120, 0]),
-         "p": _animated([(0, [400, 156, 0]), (16, [400, 120, 0]), (104, [400, 120, 0]), (119, [420, 100, 0])]),
-         "o": _animated([(0, 0), (7, 100), (105, 100), (119, 0)])})
-    add("Accent", [_rect(140, 120, 26, 96, 12), _fill(accent)], 12, 108,
-        {"o": _animated([(12, 0), (20, 100), (102, 100), (108, 0)])})
-    tick = [[590, 120], [600, 132], [622, 104]]
-    add("Confirmation", [_path(tick, False), _stroke(accent, 7)], 86, FRAMES,
-        {"o": _animated([(86, 0), (94, 100), (119, 100)])})
-
-    document = {"t": brief["label"], "f": "Poppins", "s": 40, "j": 0, "tr": 0, "lh": 50, "ls": 0,
-                "fc": [int(ink[i:i + 2], 16) / 255 for i in (1, 3, 5)]}
-    layers.append({"ddd": 0, "ind": next_index, "ty": 5, "nm": "Call to action", "sr": 1,
-                   "ks": _transform({"a": _static([0, 0, 0]),
-                                     "p": _animated([(0, [400, 156, 0]), (16, [400, 120, 0]),
-                                                     (104, [400, 120, 0]), (119, [420, 100, 0])]),
-                                     "o": _animated([(0, 0), (8, 100), (104, 100), (119, 0)])}),
-                   "ao": 0, "ip": 0, "op": FRAMES, "st": 0, "bm": 0,
-                   "t": {"d": {"k": [{"t": 0, "s": document}]}, "m": {"g": 1, "a": _static([0, 0])}, "a": []}})
-    if image_name:
-        # The picture sits on top of the card, to the left of the words, and performs the requested gesture.
-        layers.append({"ddd": 0, "ind": next_index, "ty": 2, "nm": "Picture", "sr": 1,
+    if kind == "character":
+        if not image_name:
+            raise ValueError("The character motion needs a cut-out picture.")
+        # Only the picture: no card, no box, no background. It performs the gesture in the middle of the strip.
+        layers.append({"ddd": 0, "ind": next_index, "ty": 2, "nm": "Character", "sr": 1,
                        "ks": _transform({"a": _static([110, 110, 0]),
                                          "p": _animated([(0, [180, 120, 0]), (14, [180, 120, 0]),
                                                          (104, [180, 120, 0]), (119, [210, 100, 0])]),
                                          "o": _animated([(0, 0), (10, 100), (104, 100), (119, 0)]),
                                          **_motion_for(brief["image_action"])}),
-                       "ao": 0, "ip": 0, "op": FRAMES, "st": 0, "bm": 0, "refId": asset_id})
+                       "ao": 0, "ip": 0, "op": FRAMES, "st": 0, "bm": 0, "refId": "picture"})
+        assets = [{"id": "picture", "w": 220, "h": 220, "u": "", "p": image_name, "e": 0}]
+    else:
+        add("Card", [_rect(410, 120, 640, 124, 24), _fill(bg)], 0, FRAMES,
+            {"a": _static([400, 120, 0]),
+             "p": _animated([(0, [400, 156, 0]), (16, [400, 120, 0]), (104, [400, 120, 0]), (119, [420, 100, 0])]),
+             "o": _animated([(0, 0), (7, 100), (105, 100), (119, 0)])})
+        add("Accent", [_rect(140, 120, 26, 96, 12), _fill(accent)], 12, 108,
+            {"o": _animated([(12, 0), (20, 100), (102, 100), (108, 0)])})
+        tick = [[590, 120], [600, 132], [622, 104]]
+        add("Confirmation", [_path(tick, False), _stroke(accent, 7)], 86, FRAMES,
+            {"o": _animated([(86, 0), (94, 100), (119, 100)])})
+        document = {"t": brief["label"], "f": "Poppins", "s": 40, "j": 0, "tr": 0, "lh": 50, "ls": 0,
+                    "fc": [int(ink[i:i + 2], 16) / 255 for i in (1, 3, 5)]}
+        layers.append({"ddd": 0, "ind": next_index, "ty": 5, "nm": "Call to action", "sr": 1,
+                       "ks": _transform({"p": _animated([(0, [400, 156, 0]), (16, [400, 120, 0]),
+                                                         (104, [400, 120, 0]), (119, [420, 100, 0])]),
+                                         "o": _animated([(0, 0), (8, 100), (104, 100), (119, 0)])}),
+                       "ao": 0, "ip": 0, "op": FRAMES, "st": 0, "bm": 0,
+                       "t": {"d": {"k": [{"t": 0, "s": document}]}, "m": {"g": 1, "a": _static([0, 0])}, "a": []}})
+        assets = []
 
     return {"v": "5.12.2", "fr": FPS, "ip": 0, "op": FRAMES, "w": W, "h": H,
-            "nm": "Custom / " + brief["action"],
-            "assets": [{"id": asset_id, "w": 220, "h": 220, "u": "", "p": image_name, "e": 0}] if image_name else [],
+            "nm": f"Custom / {kind} / {brief['action']}", "assets": assets,
             "fonts": {"list": [{"fName": "Poppins", "fFamily": "Poppins ExtraBold", "fStyle": "ExtraBold", "ascent": 75}]},
             "layers": list(reversed(layers))}
 
@@ -315,48 +341,76 @@ def new_draft_id() -> str:
     return hashlib.sha1(os.urandom(16)).hexdigest()[:16]
 
 
-def draft(cid: str, brief: dict, image: bytes | None, checkout: str) -> dict:
-    """Make the Lottie scene and a filmstrip of at least six real frames. Nothing is saved for use yet."""
+KINDS = ("action", "character")
+
+
+def check_cutout(image: bytes) -> bytes:
+    """The character motion needs a PNG whose background was removed, not a photo with a solid background."""
+    from PIL import Image
+    try:
+        source = Image.open(io.BytesIO(image))
+        if source.format != "PNG":
+            raise ValueError("Use a PNG picture with the background removed.")
+        source = source.convert("RGBA")
+    except (ValueError, OSError):
+        raise ValueError("That picture could not be opened. Use a PNG with the background removed.")
+    low, high = source.getchannel("A").getextrema()
+    if low != 0 or high == 0:
+        raise ValueError("The picture needs a transparent background. Remove the background before uploading.")
+    source.thumbnail((220, 220), Image.LANCZOS)
+    out = io.BytesIO()
+    source.save(out, "PNG")
+    return out.getvalue()
+
+
+def draft(cid: str, brief: dict, image: bytes, checkout: str) -> dict:
+    """Make two Lottie scenes and a filmstrip for each. Nothing is saved for use yet."""
     status = checkout_status(checkout)
     if not status["ready"]:
         raise ValueError(status["message"])
+    cutout = check_cutout(image)
     did = new_draft_id()
     folder = _draft_dir(cid, did)
     folder.mkdir(parents=True, exist_ok=True)
-    scene = folder / "lottie.json"
-    scene.write_text(json.dumps(build_lottie(brief, SOURCE_IMAGE if image else "")), encoding="utf-8")
-    if image:
-        from PIL import Image
-        source = Image.open(io.BytesIO(image)).convert("RGBA")
-        source.thumbnail((220, 220), Image.LANCZOS)
-        source.save(folder / SOURCE_IMAGE, "PNG")
+    (folder / SOURCE_IMAGE).write_bytes(cutout)
+    scenes = {"action": build_lottie(brief, "action"), "character": build_lottie(brief, "character", SOURCE_IMAGE)}
+    frames_by_kind = {}
     try:
-        result = _run(status["checkout"], scene, folder, folder / SOURCE_IMAGE if image else None, False)
+        for kind in KINDS:
+            scene = folder / f"{kind}.json"
+            scene.write_text(json.dumps(scenes[kind]), encoding="utf-8")
+            out = folder / kind
+            out.mkdir(exist_ok=True)
+            result = _run(status["checkout"], scene, out, folder / SOURCE_IMAGE if kind == "character" else None, False)
+            frames = [f for f in result.get("frames") or [] if re.fullmatch(r"frame-\d{4}\.png", f)]
+            if len(frames) < 6:
+                raise ValueError("The renderer did not make enough frames to show the motion.")
+            frames_by_kind[kind] = frames
     except Exception:
         shutil.rmtree(folder, ignore_errors=True)
         raise
-    frames = [f for f in result.get("frames") or [] if re.fullmatch(r"frame-\d{4}\.png", f)]
-    if len(frames) < 6:
-        shutil.rmtree(folder, ignore_errors=True)
-        raise ValueError("The renderer did not make enough frames to show the motion.")
-    return {"id": did, "frames": frames, "brief": clean_brief(brief)}
+    return {"id": did, "frames": frames_by_kind, "brief": clean_brief(brief)}
 
 
-def filmstrip_data(cid: str, did: str, frames: list | None = None) -> bytes:
+def _kind(kind: str) -> str:
+    if kind not in KINDS:
+        raise ValueError("That motion part isn't valid.")
+    return kind
+
+
+def filmstrip_data(cid: str, did: str, kind: str = "action") -> bytes:
     """One JPEG strip with the frames in order, so the person can judge the whole progression at a glance."""
     from PIL import Image, ImageDraw
     if not DRAFT_ID.fullmatch(did):
         raise ValueError("That motion draft is not valid.")
-    folder = _draft_dir(cid, did)
-    frames = frames or sorted(p.name for p in _draft_dir(cid, did).glob("frame-*.png"))
+    folder = _draft_dir(cid, did) / _kind(kind)
+    frames = sorted(p.name for p in folder.glob("frame-*.png"))
     shown = frames if len(frames) <= 11 else frames[::2]
     cell_w, cell_h, cols = 220, 78, 4
     rows = (len(shown) + cols - 1) // cols
     canvas = Image.new("RGB", (cols * cell_w, rows * cell_h), (18, 18, 18))
     draw = ImageDraw.Draw(canvas)
     for i, name in enumerate(shown):
-        if not re.fullmatch(r"frame-\d{4}\.png", name):
-            raise ValueError("That motion draft is not valid.")
         frame = Image.open(folder / name).convert("RGBA")
         frame.thumbnail((cell_w - 8, cell_h - 8), Image.LANCZOS)
         background = Image.new("RGBA", frame.size, (18, 18, 18, 255))
@@ -369,12 +423,12 @@ def filmstrip_data(cid: str, did: str, frames: list | None = None) -> bytes:
     return out.getvalue()
 
 
-def frame_jpeg(cid: str, did: str, name: str) -> bytes:
+def frame_jpeg(cid: str, did: str, kind: str, name: str) -> bytes:
     """One bigger frame, for people who want to look at the expressiveness closely."""
     if not DRAFT_ID.fullmatch(did) or not re.fullmatch(r"frame-\d{4}\.png", name):
         raise ValueError("That motion draft is not valid.")
     from PIL import Image
-    frame = Image.open(_draft_dir(cid, did) / name).convert("RGBA")
+    frame = Image.open(_draft_dir(cid, did) / _kind(kind) / name).convert("RGBA")
     background = Image.new("RGBA", frame.size, (18, 18, 18, 255))
     background.alpha_composite(frame)
     out = io.BytesIO()
@@ -383,7 +437,7 @@ def frame_jpeg(cid: str, did: str, name: str) -> bytes:
 
 
 def approve(cid: str, did: str, checkout: str) -> dict:
-    """After approval only: encode the alpha WebM and keep the Lottie source for later editing."""
+    """After approval only: encode both motions and lay them into one transparent WebM for the clip."""
     if not DRAFT_ID.fullmatch(did):
         raise ValueError("That motion draft is not valid.")
     status = checkout_status(checkout)
@@ -391,21 +445,34 @@ def approve(cid: str, did: str, checkout: str) -> dict:
         raise ValueError(status["message"])
     from . import creators
     folder = _draft_dir(cid, did)
-    scene = folder / "lottie.json"
-    if not scene.is_file():
-        raise ValueError("That motion draft has expired. Ask for it again.")
-    picture = folder / SOURCE_IMAGE if (folder / SOURCE_IMAGE).is_file() else None
-    _run(status["checkout"], scene, folder, picture, True)
-    webm = folder / "motion.webm"
-    if not webm.is_file():
+    scenes = {}
+    for kind in KINDS:
+        scene = folder / f"{kind}.json"
+        if not scene.is_file():
+            raise ValueError("That motion draft has expired. Ask for it again.")
+        scenes[kind] = json.loads(scene.read_text(encoding="utf-8"))
+        _run(status["checkout"], scene, folder / kind,
+             folder / SOURCE_IMAGE if kind == "character" else None, True)
+    action_webm, character_webm = folder / "action" / "motion.webm", folder / "character" / "motion.webm"
+    if not action_webm.is_file() or not character_webm.is_file():
         raise ValueError("The motion could not be encoded. Ask for it again.")
-    scene_data = json.loads(scene.read_text(encoding="utf-8"))
+    merged = folder / "motion.webm"
+    ffmpeg = shutil.which("ffmpeg") or "ffmpeg"
+    combined = subprocess.run([ffmpeg, "-y", "-v", "error", "-c:v", "libvpx-vp9", "-i", str(action_webm),
+                               "-c:v", "libvpx-vp9", "-i", str(character_webm),
+                               "-filter_complex", "[0:v][1:v]overlay=0:0:format=auto[out]", "-map", "[out]",
+                               "-c:v", "libvpx-vp9", "-pix_fmt", "yuva420p", "-b:v", "0", "-crf", "22",
+                               "-deadline", "good", "-cpu-used", "4", "-auto-alt-ref", "0", "-an", str(merged)],
+                              capture_output=True, text=True, encoding="utf-8", errors="replace",
+                              creationflags=NO_WINDOW, timeout=300)
+    if combined.returncode != 0 or not merged.is_file():
+        raise ValueError("The two motions could not be joined. Ask for them again.")
     mid = "motion-" + hashlib.sha1(os.urandom(8)).hexdigest()[:10]
     dest = creators.root(cid) / "custom-motions"
     dest.mkdir(parents=True, exist_ok=True)
-    webm.replace(dest / f"{mid}.webm")
-    (dest / f"{mid}.json").write_text(json.dumps(scene_data), encoding="utf-8")
-    return {"id": mid, "lottie": scene_data, "asset": dest / f"{mid}.webm"}
+    merged.replace(dest / f"{mid}.webm")
+    (dest / f"{mid}.json").write_text(json.dumps(scenes), encoding="utf-8")
+    return {"id": mid, "lottie": scenes["action"], "asset": dest / f"{mid}.webm"}
 
 
 def discard(cid: str, did: str):

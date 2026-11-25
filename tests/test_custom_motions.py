@@ -12,7 +12,7 @@ sys.path.insert(0, ".")
 TEMP = tempfile.TemporaryDirectory(prefix="pc-custom-motions-")
 os.environ.update(PEAKCUT_DATA=TEMP.name, DATABASE_URL="", PEAKCUT_ACCOUNTS="0")
 from studio import auth, creators, ctx, custom_motions as cm, db, interactions, jobs  # noqa: E402
-from PIL import Image  # noqa: E402
+from PIL import Image, ImageDraw  # noqa: E402
 
 
 def brief(**extra):
@@ -42,33 +42,45 @@ class MotionRules(unittest.TestCase):
         with self.assertRaises(ValueError):
             cm.clean_brief(brief(action="dance"))
 
-    def test_lottie_scene_uses_the_shared_contract_and_the_uploaded_picture(self):
-        doc = cm.build_lottie(cm.clean_brief(brief()), cm.SOURCE_IMAGE)
-        self.assertEqual((doc["w"], doc["h"], doc["fr"], doc["op"]), (800, 240, 30, 120))
-        self.assertEqual(doc["assets"][0]["p"], cm.SOURCE_IMAGE)
-        self.assertEqual(len(doc["fonts"]["list"]), 1)
-        kinds = [l["ty"] for l in doc["layers"]]
-        self.assertIn(2, kinds)      # the picture
-        self.assertIn(5, kinds)      # native text
-        self.assertGreaterEqual(sum(1 for l in doc["layers"] if l["ty"] == 4), 3)
-        def expression(node):
-            if isinstance(node, dict):
-                return any((k == "x" and isinstance(v, str)) or expression(v) for k, v in node.items())
-            if isinstance(node, list):
-                return any(expression(v) for v in node)
-            return False
-        for layer in doc["layers"]:
-            self.assertFalse(expression(layer))   # no renderer-specific expressions
-        plain = cm.build_lottie(cm.clean_brief(brief(has_image=False)))
-        self.assertEqual(plain["assets"], [])
-        self.assertNotIn(2, [l["ty"] for l in plain["layers"]])
+    def test_a_chosen_palette_overrides_the_ai_colors(self):
+        palette = {"background": "#010203", "ink": "#fefefe", "accent": "#ffcc00"}
+        answer = {"style": "Bold", "background": "#999999", "ink": "#111111", "accent": "#ff0000",
+                  "image_action": "wave", "label": "INSCREVA-SE", "note": "Teste"}
+        with patch("studio.ai.ready", return_value=True), \
+                patch("studio.brain.ask_ai", return_value=(answer, "model", 20)) as ask:
+            got = cm.ask_brief(brief(palette_colors=palette))
+        for key, value in palette.items():
+            self.assertEqual(got[key], value)
+        self.assertIn(palette["accent"], ask.call_args.args[0])   # the model was told which colors to use
+
+    def test_two_lottie_scenes_share_the_contract_but_not_the_artwork(self):
+        clean = cm.clean_brief(brief())
+        action = cm.build_lottie(clean, "action")
+        character = cm.build_lottie(clean, "character", cm.SOURCE_IMAGE)
+        for doc in (action, character):
+            self.assertEqual((doc["w"], doc["h"], doc["fr"], doc["op"]), (800, 240, 30, 120))
+            self.assertEqual(len(doc["fonts"]["list"]), 1)
+            def expression(node):
+                if isinstance(node, dict):
+                    return any((k == "x" and isinstance(v, str)) or expression(v) for k, v in node.items())
+                if isinstance(node, list):
+                    return any(expression(v) for v in node)
+                return False
+            self.assertFalse(any(expression(layer) for layer in doc["layers"]))
+        self.assertEqual(action["assets"], [])
+        self.assertIn(5, [l["ty"] for l in action["layers"]])       # the action's text
+        self.assertEqual(character["assets"][0]["p"], cm.SOURCE_IMAGE)
+        self.assertIn(2, [l["ty"] for l in character["layers"]])    # the cut-out picture
+        self.assertNotIn(5, [l["ty"] for l in character["layers"]]) # no card, no label on the character
+        with self.assertRaises(ValueError):
+            cm.build_lottie(clean, "character")
 
     def test_ai_brief_is_asked_once_and_merged_with_the_form(self):
         answer = {"style": "Purple and bold", "background": "#241035", "ink": "#ffffff",
                   "accent": "#ffcf3f", "image_action": "laugh", "label": "INSCREVA-SE", "note": "Alegre"}
         with patch("studio.ai.ready", return_value=True), \
                 patch("studio.brain.ask_ai", return_value=(answer, "model", 20)) as ask:
-            got = cm.ask_brief(brief(description="um personagem roxo", image_prompt="acenar tchau"))
+            got = cm.ask_brief(brief(action_description="um personagem roxo", image_prompt="acenar tchau"))
         self.assertEqual(ask.call_count, 1)
         self.assertEqual(got["image_action"], "laugh")
         self.assertIn("purple", ask.call_args.args[0].lower())
@@ -84,18 +96,31 @@ class MotionRules(unittest.TestCase):
             with self.assertRaises(ValueError):
                 cm.ask_brief(brief())
 
-    def test_filmstrip_shows_at_least_six_real_frames(self):
+    def test_a_cutout_picture_needs_real_transparency(self):
+        solid = io.BytesIO()
+        Image.new("RGB", (40, 40), (255, 0, 0)).save(solid, "PNG")
+        with self.assertRaises(ValueError):
+            cm.check_cutout(solid.getvalue())
+        cut = io.BytesIO()
+        image = Image.new("RGBA", (40, 40), (255, 0, 0, 0))
+        ImageDraw.Draw(image).ellipse((8, 8, 32, 32), fill=(255, 0, 0, 255))
+        image.save(cut, "PNG")
+        self.assertEqual(Image.open(io.BytesIO(cm.check_cutout(cut.getvalue()))).mode, "RGBA")
+
+    def test_each_motion_has_its_own_filmstrip(self):
         folder = cm._draft_dir("test", "a" * 16)
-        folder.mkdir(parents=True, exist_ok=True)
-        names = []
-        for i in range(11):
-            name = f"frame-{i * 10:04d}.png"
-            fake_frame(folder / name)
-            names.append(name)
-        strip = cm.filmstrip_data("test", "a" * 16)
-        self.assertEqual(strip[:2], b"\xff\xd8")
-        self.assertGreater(Image.open(io.BytesIO(strip)).width, 400)
-        self.assertEqual(cm.frame_jpeg("test", "a" * 16, names[2])[:2], b"\xff\xd8")
+        for kind in cm.KINDS:
+            sub = folder / kind
+            sub.mkdir(parents=True, exist_ok=True)
+            for i in range(11):
+                fake_frame(sub / f"frame-{i * 10:04d}.png")
+        for kind in cm.KINDS:
+            strip = cm.filmstrip_data("test", "a" * 16, kind)
+            self.assertEqual(strip[:2], b"\xff\xd8")
+            self.assertGreater(Image.open(io.BytesIO(strip)).width, 400)
+            self.assertEqual(cm.frame_jpeg("test", "a" * 16, kind, "frame-0020.png")[:2], b"\xff\xd8")
+        with self.assertRaises(ValueError):
+            cm.filmstrip_data("test", "a" * 16, "other")
         cm.discard("test", "a" * 16)
         self.assertFalse(folder.exists())
 

@@ -1483,26 +1483,32 @@ def preview_interaction_style(request: Request, cid: str):
 
 
 @app.post("/api/creators/{cid}/custom-motions/draft")
-async def draft_custom_motion(cid: str, action: str = Form(""), description: str = Form(""),
-                              image_prompt: str = Form(""), has_image: str = Form("0"),
-                              language: str = Form("en"), image: UploadFile | None = File(None)):
-    """Ask the AI for a motion and render at least six real frames. Nothing is used in a clip yet."""
+async def draft_custom_motion(cid: str, action: str = Form(""), action_description: str = Form(""),
+                              image_prompt: str = Form(""), language: str = Form("en"),
+                              palette: str = Form(""), image: UploadFile | None = File(None)):
+    """Ask the AI for two motions and render a filmstrip for each. Nothing is used in a clip yet."""
     if not creators.get(cid):
         raise HTTPException(404, "No such creator")
     cm.cleanup_old_drafts(cid)
     _throttle("cmotion:" + ctx.uid(), 20, 600, "That's a lot of motion ideas in a short time. Wait a few minutes.")
     usage.set_context(cid, creators.get(cid).get("name") or "")
-    wants_image = has_image == "1"
-    picture = None
-    if wants_image:
-        if not image:
-            raise HTTPException(400, "Choose the picture you want animated.")
-        picture = await image.read(8 * 1024 * 1024 + 1)
-        if not picture or len(picture) > 8 * 1024 * 1024:
-            raise HTTPException(400, "That picture is too big. Use one under 8 MB.")
+    if not image:
+        raise HTTPException(400, "Send a PNG picture with the background removed.")
+    picture = await image.read(8 * 1024 * 1024 + 1)
+    if not picture or len(picture) > 8 * 1024 * 1024:
+        raise HTTPException(400, "That picture is too big. Use one under 8 MB.")
+    creator = creators.get(cid)
+    palette_colors = None
+    if palette == "youtube":
+        palette_colors = {k: ist.YOUTUBE[k] for k in ("background", "ink", "accent")}
+    elif palette:
+        style = next((s for s in creator.get("interaction_styles") or [] if s.get("id") == palette), None)
+        if style:
+            palette_colors = {k: style[k] for k in ("background", "ink", "accent")}
     try:
-        brief = cm.ask_brief({"action": action, "description": description, "image_prompt": image_prompt,
-                              "has_image": wants_image, "language": language})
+        brief = cm.ask_brief({"action": action, "action_description": action_description,
+                              "image_prompt": image_prompt, "has_image": True, "language": language,
+                              "palette_colors": palette_colors})
         draft_ = cm.draft(cid, brief, picture, accounts.settings().get("lottie_checkout", ""))
     except ValueError as e:
         raise HTTPException(400, str(e))
@@ -1514,22 +1520,22 @@ async def draft_custom_motion(cid: str, action: str = Form(""), description: str
 
 
 @app.get("/api/creators/{cid}/custom-motions/{did}/filmstrip")
-def custom_motion_filmstrip(cid: str, did: str):
+def custom_motion_filmstrip(cid: str, did: str, kind: str = "action"):
     if not creators.get(cid):
         raise HTTPException(404, "No such creator")
     try:
-        data = cm.filmstrip_data(cid, did)
+        data = cm.filmstrip_data(cid, did, kind)
     except ValueError as e:
         raise HTTPException(400, str(e))
     return Response(content=data, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=86400"})
 
 
 @app.get("/api/creators/{cid}/custom-motions/{did}/frame/{name}")
-def custom_motion_frame(cid: str, did: str, name: str):
+def custom_motion_frame(cid: str, did: str, kind: str, name: str):
     if not creators.get(cid):
         raise HTTPException(404, "No such creator")
     try:
-        data = cm.frame_jpeg(cid, did, name)
+        data = cm.frame_jpeg(cid, did, kind, name)
     except (ValueError, OSError):
         raise HTTPException(404, "No such frame")
     return Response(content=data, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=86400"})

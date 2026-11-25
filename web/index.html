@@ -1733,27 +1733,34 @@ async function openCustomMotion(given) {
   const lottie = S.status.lottie || {ready:false, message:""};
   dlg.innerHTML = `<form class="dlg cm-dlg" id="cmform">
     <h2>${i18n.html("Custom motion")}</h2>
-    <p class="help">${i18n.html("Describe the animation you want. The AI draws it as a Lottie motion and shows at least six real frames of the whole movement. Nothing is used in a clip until you approve it.")}</p>
+    <p class="help">${i18n.html("Describe the action motion and the character motion separately. The AI draws both as Lottie animations and shows a filmstrip for each. Nothing is used in a clip until you approve both.")}</p>
     <section><h3>${i18n.html("Saved motions")}</h3><div id="cm_saved">${savedMotions(c)}</div></section>
     ${lottie.ready ? "" : `<p class="help" role="alert">${esc(lottie.message || i18n.t("Custom motions are not available on this server."))}</p>`}
     <label class="f">${i18n.html("Audience request")}<select id="cm_action">${Object.keys(INTERACTION_LABELS).map(a =>
       `<option value="${a}">${esc(i18n.t(INTERACTION_LABELS[a]))}</option>`).join("")}</select></label>
     <label class="f">${i18n.html("Motion name")}<input id="cm_name" maxlength="40" placeholder="${i18n.html("Give it a short name")}"></label>
-    <label class="f">${i18n.html("How should the motion look?")}<textarea id="cm_desc" rows="3" maxlength="600" placeholder="${i18n.html("For example: quick and cheerful, bold purple letters, a little bouncing star")}"></textarea></label>
-    <label class="sw"><input type="checkbox" id="cm_has_image">${i18n.html("I have a picture to animate")}</label>
-    <div id="cm_image_box" hidden>
-      <label class="f">${i18n.html("Picture")}<input type="file" id="cm_image" accept="image/png,image/jpeg,image/webp"></label>
-      <label class="f">${i18n.html("What should the picture do?")}<textarea id="cm_image_prompt" rows="2" maxlength="300" placeholder="${i18n.html("Wave goodbye, laugh, cry, jump…")}"></textarea></label>
-    </div>
+    <label class="f">${i18n.html("Color palette")}<select id="cm_palette">
+      <option value="">${i18n.html("The AI chooses")}</option>
+      <option value="youtube">${i18n.html("YouTube (default)")}</option>
+      ${(c.interaction_styles || []).map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join("")}
+    </select><span class="hint">${i18n.html("Leave it to the AI, or use the built-in YouTube colors or one of this creator's styles.")}</span></label>
+    <label class="f">${i18n.html("How should the action animation look?")}<textarea id="cm_desc" rows="3" maxlength="600" placeholder="${i18n.html("For example: quick and cheerful, bold purple letters, a little bouncing star")}"></textarea></label>
+    <label class="f">${i18n.html("Cut-out picture (transparent PNG)")}<input type="file" id="cm_image" accept="image/png"><span class="hint">${i18n.html("Send a PNG with the background removed. PeakCut will animate only the picture, with no background or box.")}</span></label>
+    <label class="f">${i18n.html("What should the character do?")}<textarea id="cm_image_prompt" rows="2" maxlength="300" placeholder="${i18n.html("Wave goodbye, laugh, cry, jump…")}"></textarea></label>
     <div id="cm_review" hidden>
-      <h3>${i18n.html("Check the motion")}</h3>
-      <button type="button" class="cm-strip-btn" id="cm_expand" style="padding:0;border:0;background:transparent;width:100%;cursor:zoom-in" aria-label="${esc(i18n.t("Expand image"))}" title="${esc(i18n.t("Expand image"))}">
-        <img class="cm-strip" id="cm_strip" alt="${esc(i18n.t("Preview"))}">
+      <h3>${i18n.html("Check both motions")}</h3>
+      <p class="help">${esc(i18n.t("Motion of the action"))}</p>
+      <button type="button" class="cm-strip-btn" data-cm-strip="action" style="padding:0;border:0;background:transparent;width:100%;cursor:zoom-in" aria-label="${esc(i18n.t("Expand image"))}" title="${esc(i18n.t("Expand image"))}">
+        <img class="cm-strip" id="cm_strip_action" alt="${esc(i18n.t("Preview of the action motion"))}">
       </button>
-      <p class="help">${i18n.html("These are real frames of the animation, in order. Click the image to expand it. Approve only if the movement is what you asked for.")}</p>
+      <p class="help">${esc(i18n.t("Motion of the character"))}</p>
+      <button type="button" class="cm-strip-btn" data-cm-strip="character" style="padding:0;border:0;background:transparent;width:100%;cursor:zoom-in" aria-label="${esc(i18n.t("Expand image"))}" title="${esc(i18n.t("Expand image"))}">
+        <img class="cm-strip" id="cm_strip_character" alt="${esc(i18n.t("Preview of the character motion"))}">
+      </button>
+      <p class="help">${i18n.html("Both filmstrips show real frames in order. Click either image to expand it. Approve only if both movements are what you asked for.")}</p>
     </div>
     <div class="row" style="flex-wrap:wrap;gap:8px">
-      <button type="button" class="btn primary" id="cm_create"${lottie.ready ? "" : " disabled"}>${ic("bolt")}${i18n.html("Draw the motion with AI")}</button>
+      <button type="button" class="btn primary" id="cm_create"${lottie.ready ? "" : " disabled"}>${ic("bolt")}${i18n.html("Draw both motions with AI")}</button>
       <button type="button" class="btn" id="cm_again" hidden>${i18n.html("Try another idea")}</button>
       <button type="button" class="btn primary" id="cm_approve" hidden>${i18n.html("Approve and use")}</button>
       <button type="button" class="btn" id="cm_discard" hidden>${i18n.html("Discard")}</button>
@@ -1763,7 +1770,10 @@ async function openCustomMotion(given) {
   const s = q => dlg.querySelector(q);
   let did = "", busy = false, armed = "";
   s("#cmform").addEventListener("submit", e => e.preventDefault());
-  s("#cm_has_image").addEventListener("change", () => s("#cm_image_box").hidden = !s("#cm_has_image").checked);
+  dlg.querySelectorAll("[data-cm-strip]").forEach(b => b.addEventListener("click", () => {
+    const src = s(`#cm_strip_${b.dataset.cmStrip}`).getAttribute("src");
+    if (src) openImagePreview(src, i18n.t(b.dataset.cmStrip === "action" ? "Preview of the action motion" : "Preview of the character motion"));
+  }));
   s("#cm_cancel").addEventListener("click", () => {
     if (did) send(`/api/creators/${cid}/custom-motions/${did}/discard`, {}).catch(() => {});
     dlg.close();
@@ -1788,28 +1798,26 @@ async function openCustomMotion(given) {
       dlg.close(); await tick(); toast(i18n.t("Custom motion deleted"), "ok");
     } catch (err) { toast(err.message, "bad"); b.disabled = false; }
   }));
-  s("#cm_expand").addEventListener("click", () => {
-    const src = s("#cm_strip").getAttribute("src");
-    if (src) openImagePreview(src, i18n.t("Custom motion preview"));
-  });
   const create = async () => {
     if (busy) return;
-    const wants = s("#cm_has_image").checked, file = s("#cm_image").files[0];
-    if (wants && !file) return toast(i18n.t("Choose the picture you want animated."), "bad");
+    const file = s("#cm_image").files[0];
+    if (!file) return toast(i18n.t("Choose a PNG picture with the background removed."), "bad");
     busy = true; s("#cm_create").disabled = true;
     const label = s("#cm_create").textContent; s("#cm_create").textContent = i18n.t("Drawing the motion…");
     try {
       if (did) { await send(`/api/creators/${cid}/custom-motions/${did}/discard`, {}); did = ""; }
       const form = new FormData();
       form.set("action", s("#cm_action").value);
-      form.set("description", s("#cm_desc").value.trim());
-      form.set("has_image", wants ? "1" : "0");
+      form.set("action_description", s("#cm_desc").value.trim());
       form.set("image_prompt", s("#cm_image_prompt").value.trim());
       form.set("language", S.status.caption_language || "en");
-      if (wants) form.set("image", file);
+      form.set("palette", s("#cm_palette").value);
+      form.set("image", file);
       const got = await api(`/api/creators/${cid}/custom-motions/draft`, {method:"POST", body:form});
       did = got.id;
-      s("#cm_strip").src = `/api/creators/${cid}/custom-motions/${did}/filmstrip?r=${Date.now()}`;
+      for (const kind of ["action", "character"]) {
+        s(`#cm_strip_${kind}`).src = `/api/creators/${cid}/custom-motions/${did}/filmstrip?kind=${kind}&r=${Date.now()}`;
+      }
       s("#cm_review").hidden = false;
       s("#cm_again").hidden = s("#cm_approve").hidden = s("#cm_discard").hidden = s("#cm_create").hidden = false;
       s("#cm_create").hidden = true;
