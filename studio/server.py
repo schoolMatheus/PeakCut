@@ -2102,7 +2102,8 @@ def yt_cookies_put(request: Request, body: dict = Body(...)):
         f.write_text(text, encoding="utf-8")
         with contextlib.suppress(OSError):
             f.chmod(0o600)
-    media._yt_refused_until = 0.0        # try YouTube again straight away
+    media._yt_refused_until = 0.0        # try YouTube again straight away, on every route
+    media._ROUTE_REFUSED.clear()
     return yt_cookies_get(request)
 
 

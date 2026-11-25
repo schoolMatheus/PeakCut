@@ -64,6 +64,7 @@ def main() -> int:
                 ("big uploads in pieces", ["tests/test_upload_parts.py", BASE]),
                 ("AI services", ["tests/test_ai.py"]),
                 ("YouTube automatic translation preference", ["tests/test_youtube_translation.py"]),
+                ("YouTube refused here: other ways to ask", ["tests/test_youtube_routes.py"]),
                 ("Portuguese multilingual speech", ["tests/test_speech_portuguese.py"]),
                 ("new layouts with edited segments and censorship", ["tests/test_merge_render.py"]),
                 ("upstream features with Portuguese and edited clips", ["tests/test_merge_clips.py"]),
