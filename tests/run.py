@@ -75,6 +75,7 @@ def main() -> int:
                 ("turning captions off and back on", ["tests/test_captions.py"]),
                 ("animated audience requests", ["tests/test_interactions.py"]),
                 ("custom interaction styles", ["tests/test_interaction_styles.py"]),
+                ("custom audience motions", ["tests/test_custom_motions.py"]),
                 ("YouTube motion artwork and sound effects", ["tests/test_motion.py"]),
                 ("word censorship in captions and audio", ["tests/test_censorship.py"]),
                 ("editing clips from the original video", ["tests/test_clip_edits.py"]),

@@ -254,6 +254,12 @@ label.ck input{accent-color:var(--brand);margin:0}
 .style-dlg .style-art img{width:54px;height:54px;border-radius:10px;object-fit:cover;border:1px solid var(--line-2)}
 .style-dlg .style-note{margin:0}
 .style-dlg .dlg-foot{flex-wrap:wrap}
+.cm-dlg{width:600px}
+.cm-list{display:flex;flex-direction:column;gap:6px;margin:0;padding:0;list-style:none}
+.cm-list li{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--line-2);border-radius:var(--r);background:#fff;font-size:13px}
+.cm-list li .grow{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cm-strip{display:block;width:100%;height:auto;border:1px solid var(--line-2);border-radius:var(--r);background:var(--muted)}
+.cm-note{margin:0;color:var(--dim)}
 .fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:18px}
 .span{grid-column:1/-1}
 .time-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 8px}
@@ -1558,6 +1564,7 @@ const INTERACTION_LABELS = {subscribe:"Subscribe to the channel", like:"Like the
 function interactionOptions(selected, styleFor = "", withStyle = true) {
   const row = withStyle ? `<div class="style-row">
       <button type="button" class="btn sm" data-act="istyles" data-cid="${esc(styleFor)}">${ic("plus")}${i18n.html("Custom style")}</button>
+      <button type="button" class="btn sm" data-act="cmotion" data-cid="${esc(styleFor)}">${ic("play")}${i18n.html("Custom motion")}</button>
       <span class="help style-name" data-style-label data-cid="${esc(styleFor)}"></span></div>` : "";
   return `<fieldset class="interaction-options"><legend class="ot">${i18n.html("Audience interaction")}</legend>
     <p class="help">${i18n.html("Optional animated requests, one at a time, without covering captions.")}</p>
@@ -1701,6 +1708,123 @@ async function openInteractionStyles(given) {
   refresh();
   dlg.showModal();
 }
+function savedMotions(c) {
+  const motions = c.custom_motions || [], chosen = c.custom_motion_selected || {};
+  if (!motions.length) return `<p class="help">${i18n.html("No custom motion yet. Describe one below.")}</p>`;
+  return `<ul class="cm-list">${motions.map(m => `<li><span>${esc(i18n.t(INTERACTION_LABELS[m.action] || m.action))}</span>
+      <span class="grow">${esc(m.name)}</span>
+      ${chosen[m.action] === m.id ? `<span class="pill ok">${ic("check")}${i18n.html("In use")}</span>`
+        : `<button type="button" class="btn sm" data-cm-use="${esc(m.id)}" data-action="${esc(m.action)}">${i18n.html("Use")}</button>`}
+      <button type="button" class="btn sm danger" data-cm-del="${esc(m.id)}">${i18n.html("Delete")}</button></li>`).join("")}</ul>`;
+}
+
+async function openCustomMotion(given) {
+  const cid = styleTarget(given), c = S.creators.find(x => x.id === cid);
+  if (!c) return toast(i18n.t("Choose a creator first."), "bad");
+  const dlg = $("#formdlg");
+  if (dlg.open) dlg.close();
+  dlg.onclose = null; dlg.returnValue = "";
+  const lottie = S.status.lottie || {ready:false, message:""};
+  dlg.innerHTML = `<form class="dlg cm-dlg" id="cmform">
+    <h2>${i18n.html("Custom motion")}</h2>
+    <p class="help">${i18n.html("Describe the animation you want. The AI draws it as a Lottie motion and shows at least six real frames of the whole movement. Nothing is used in a clip until you approve it.")}</p>
+    <section><h3>${i18n.html("Saved motions")}</h3><div id="cm_saved">${savedMotions(c)}</div></section>
+    ${lottie.ready ? "" : `<p class="help" role="alert">${esc(lottie.message || i18n.t("Custom motions are not available on this server."))}</p>`}
+    <label class="f">${i18n.html("Audience request")}<select id="cm_action">${Object.keys(INTERACTION_LABELS).map(a =>
+      `<option value="${a}">${esc(i18n.t(INTERACTION_LABELS[a]))}</option>`).join("")}</select></label>
+    <label class="f">${i18n.html("Motion name")}<input id="cm_name" maxlength="40" placeholder="${i18n.html("Give it a short name")}"></label>
+    <label class="f">${i18n.html("How should it look?")}<textarea id="cm_desc" rows="3" maxlength="600" placeholder="${i18n.html("For example: a playful purple character, bold letters, quick and cheerful")}"></textarea></label>
+    <label class="sw"><input type="checkbox" id="cm_has_image">${i18n.html("I have a picture to animate")}</label>
+    <div id="cm_image_box" hidden>
+      <label class="f">${i18n.html("Picture")}<input type="file" id="cm_image" accept="image/png,image/jpeg,image/webp"></label>
+      <label class="f">${i18n.html("What should the picture do?")}<textarea id="cm_image_prompt" rows="2" maxlength="300" placeholder="${i18n.html("Wave goodbye, laugh, cry, jump…")}"></textarea></label>
+    </div>
+    <div id="cm_review" hidden>
+      <h3>${i18n.html("Check the motion")}</h3>
+      <img class="cm-strip" id="cm_strip" alt="${esc(i18n.t("Preview"))}">
+      <p class="help">${i18n.html("These are real frames of the animation, in order. Approve only if the movement is what you asked for.")}</p>
+    </div>
+    <div class="row" style="flex-wrap:wrap;gap:8px">
+      <button type="button" class="btn primary" id="cm_create"${lottie.ready ? "" : " disabled"}>${ic("bolt")}${i18n.html("Draw the motion with AI")}</button>
+      <button type="button" class="btn" id="cm_again" hidden>${i18n.html("Try another idea")}</button>
+      <button type="button" class="btn primary" id="cm_approve" hidden>${i18n.html("Approve and use")}</button>
+      <button type="button" class="btn" id="cm_discard" hidden>${i18n.html("Discard")}</button>
+    </div>
+    <div class="dlg-foot"><button type="button" class="btn" id="cm_cancel">${i18n.html("Cancel")}</button></div>
+  </form>`;
+  const s = q => dlg.querySelector(q);
+  let did = "", busy = false, armed = "";
+  s("#cmform").addEventListener("submit", e => e.preventDefault());
+  s("#cm_has_image").addEventListener("change", () => s("#cm_image_box").hidden = !s("#cm_has_image").checked);
+  s("#cm_cancel").addEventListener("click", () => {
+    if (did) send(`/api/creators/${cid}/custom-motions/${did}/discard`, {}).catch(() => {});
+    dlg.close();
+  });
+  dlg.querySelectorAll("[data-cm-use]").forEach(b => b.addEventListener("click", async () => {
+    b.disabled = true;
+    try {
+      await send(`/api/creators/${cid}/custom-motions/select`, {action:b.dataset.action, id:b.dataset.cmUse}, "PUT");
+      dlg.close(); await tick(); toast(i18n.t("Custom motion selected for new clips."), "ok");
+    } catch (err) { toast(err.message, "bad"); b.disabled = false; }
+  }));
+  dlg.querySelectorAll("[data-cm-del]").forEach(b => b.addEventListener("click", async () => {
+    const mid = b.dataset.cmDel;
+    if (armed !== mid) {
+      armed = mid; b.textContent = i18n.t("Click again to delete");
+      setTimeout(() => { if (armed === mid) { armed = ""; b.textContent = i18n.t("Delete"); } }, 4000);
+      return;
+    }
+    b.disabled = true;
+    try {
+      await api(`/api/creators/${cid}/custom-motions/${mid}`, {method:"DELETE"});
+      dlg.close(); await tick(); toast(i18n.t("Custom motion deleted"), "ok");
+    } catch (err) { toast(err.message, "bad"); b.disabled = false; }
+  }));
+  const create = async () => {
+    if (busy) return;
+    const wants = s("#cm_has_image").checked, file = s("#cm_image").files[0];
+    if (wants && !file) return toast(i18n.t("Choose the picture you want animated."), "bad");
+    busy = true; s("#cm_create").disabled = true;
+    const label = s("#cm_create").textContent; s("#cm_create").textContent = i18n.t("Drawing the motion…");
+    try {
+      if (did) { await send(`/api/creators/${cid}/custom-motions/${did}/discard`, {}); did = ""; }
+      const form = new FormData();
+      form.set("action", s("#cm_action").value);
+      form.set("description", s("#cm_desc").value.trim());
+      form.set("has_image", wants ? "1" : "0");
+      form.set("image_prompt", s("#cm_image_prompt").value.trim());
+      form.set("language", S.status.caption_language || "en");
+      if (wants) form.set("image", file);
+      const got = await api(`/api/creators/${cid}/custom-motions/draft`, {method:"POST", body:form});
+      did = got.id;
+      s("#cm_strip").src = `/api/creators/${cid}/custom-motions/${did}/filmstrip?r=${Date.now()}`;
+      s("#cm_review").hidden = false;
+      s("#cm_again").hidden = s("#cm_approve").hidden = s("#cm_discard").hidden = s("#cm_create").hidden = false;
+      s("#cm_create").hidden = true;
+      if (!s("#cm_name").value.trim()) s("#cm_name").value = String(got.brief?.style || "Custom motion").slice(0, 40);
+    } catch (err) { toast(err.message, "bad"); }
+    finally { busy = false; s("#cm_create").disabled = false; s("#cm_create").textContent = label; }
+  };
+  s("#cm_create").addEventListener("click", create);
+  s("#cm_again").addEventListener("click", create);
+  s("#cm_discard").addEventListener("click", async () => {
+    if (!did) return;
+    try { await send(`/api/creators/${cid}/custom-motions/${did}/discard`, {}); } catch {}
+    did = ""; s("#cm_review").hidden = true; s("#cm_again").hidden = s("#cm_approve").hidden = s("#cm_discard").hidden = true;
+    s("#cm_create").hidden = false;
+  });
+  s("#cm_approve").addEventListener("click", async e => {
+    if (!did) return;
+    const b = e.currentTarget; b.disabled = true;
+    try {
+      await send(`/api/creators/${cid}/custom-motions/${did}/approve`, {name:s("#cm_name").value.trim()});
+      did = ""; dlg.close(); await tick(); updateStyleLabels();
+      toast(i18n.t("Motion approved. New clips use it."), "ok");
+    } catch (err) { toast(err.message, "bad"); b.disabled = false; }
+  });
+  dlg.showModal();
+}
+
 const speechLangs = () => S.status.speech || {en:{label:"English", state:"ready", size_mb:0}};
 const langName = k => i18n.t(speechLangs()[k]?.label || k);
 function langSeg(value) {
@@ -2756,6 +2880,7 @@ const setTabs = () => [
   ...(S.status.accounts === false ? [] : [["profile", i18n.t("Profile"), "user", i18n.t("Your name, email and how you sign in")],
                                           ["security", i18n.t("Security"), "lock", i18n.t("Password and signing out")]]),
   ["language", i18n.t("Language"), "language", i18n.t("Change the interface and caption languages")],
+  ["motion", i18n.t("Custom motions"), "play", i18n.t("The Lottie tools used to draw new motions")],
   ["censorship", i18n.t("Word censorship"), "lock", i18n.t("Hide words in captions or silence them in audio")],
   ...(S.status.user?.is_admin ? [["speech", i18n.t("Speech models"), "chat", i18n.t("The languages PeakCut can hear")], ["storage", i18n.t("Storage"), "folder", i18n.t("Where videos and clips are kept")]] : [])];
 function aiHints() {
@@ -2946,6 +3071,18 @@ async function drawSettings() {
     <div class="set-body" id="setbody"><div class="set-load">${i18n.html("Loading…")}</div></div></div>`;
   const body = $("#setbody");
   try {
+    if (tab === "motion") {
+      const s = await api("/api/settings"), k = S.status.lottie || {};
+      if (!body.isConnected) return;
+      body.innerHTML = `<section class="set-sec"><h2>${i18n.html("Custom motions")}</h2>
+        <p class="help">${i18n.html("New audience motions are drawn as Lottie animations and turned into transparent videos. This needs Node.js and a checkout of diffusionstudio/lottie with its npm dependencies installed. Clips that are already made do not need any of this.")}</p>
+        <div class="ai-form">
+          <label class="f">${i18n.html("Lottie checkout folder")}<input data-s="lottie_checkout" value="${esc(s.lottie_checkout || "")}" placeholder="C:\\peakcut-lottie" spellcheck="false"><span class="hint">${i18n.html("Leave empty to use PEAKCUT_LOTTIE_CHECKOUT or the usual folders next to PeakCut.")}</span></label>
+          <p class="help" role="status">${k.ready ? `${ic("check")} ${i18n.html("Ready: {0}", esc(k.checkout || ""))}`
+            : esc(k.message || i18n.t("Custom motions are not available on this server."))}</p>
+          <div class="row"><button class="btn primary" data-act="ssave">${i18n.html("Save")}</button></div>
+        </div></section>`;
+    }
     if (tab === "censorship") {
       const s = await api("/api/settings");
       if (!body.isConnected) return;
@@ -3817,6 +3954,7 @@ document.addEventListener("click", async e => {
     if (a === "toggleopts") { const p = $(".composer-opts"), open = !p.classList.contains("open"); p.classList.toggle("open", open); p.inert = !open; b.classList.toggle("on", open); b.setAttribute("aria-expanded", String(open)); return; }
     if (a === "template-save") return saveClipTemplate();
     if (a === "istyles") return openInteractionStyles(d.cid);
+    if (a === "cmotion") return openCustomMotion(d.cid);
     if (a.startsWith("template-")) {
       const id = b.closest("details").dataset.template;
       const custom = S.clipTemplates?.find(t => t.id === id);
@@ -4066,7 +4204,7 @@ document.addEventListener("click", async e => {
     if (a === "cdiscard") { drawCreatorForm(); return toast(i18n.t("Changes discarded")); }
     if (a === "pause") { await send("/api/settings", {paused:!S.overview.paused}, "PUT"); return loadOverview(); }
     if (a === "pcancel" || a === "pretry") { await api(`/api/posts/${d.id}/${a === "pcancel" ? "cancel" : "retry"}`, {method:"POST"}); return loadOverview(); }
-    if (a === "ssave") { await saveSettings(); toast(i18n.t("Saved"), "ok"); return drawSettings(); }
+    if (a === "ssave") { await saveSettings(); S.status = await api("/api/status"); toast(i18n.t("Saved"), "ok"); return drawSettings(); }
     if (a === "plansave") {
       const p = {}; $$("#sform [data-plan]").forEach(i => { (p[i.dataset.plan] ??= {})[i.dataset.f] = Number(i.value); });
       await send("/api/settings", {plans:p}, "PUT"); S.status = await api("/api/status"); toast(i18n.t("Plans saved"), "ok"); return drawSettings();

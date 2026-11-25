@@ -636,8 +636,9 @@ class Session:
         c.update(id=f"clip{self.n:03d}", style=self.settings["style"], layout=self.settings["layout"],
                  captions=self.job["options"].get("captions", True),
                  interactions=list(self.job["options"].get("interactions", [])),
-                 interaction_style=self.job["options"].get("interaction_style"), status="queued", version=0,
-                 made_at=time.time(), text_language=self.job.get("caption_language", "en"))
+                 interaction_style=self.job["options"].get("interaction_style"),
+                 custom_motions=self.job["options"].get("custom_motions"),
+                 status="queued", version=0, made_at=time.time(), text_language=self.job.get("caption_language", "en"))
         if self.job["options"].get("hook_text"):      # the person's own big text, in place of the AI's
             c["hook"], c["fixed_hook"] = self.job["options"]["hook_text"], True
         if self.job["options"].get("description_text"):

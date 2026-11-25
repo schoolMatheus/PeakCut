@@ -128,6 +128,16 @@ def clean_options(options) -> dict:
             if v:
                 out[k] = interaction_styles.clean_snapshot(v)
             continue
+        if k == "custom_motions":
+            if not isinstance(v, dict):
+                raise ValueError("Those custom motions aren't valid.")
+            from .interactions import ACTIONS
+            clean = {}
+            for action, filename in v.items():
+                if action in ACTIONS and isinstance(filename, str) and re.fullmatch(r"motion-[a-z0-9]{10}\.webm", filename):
+                    clean[action] = filename
+            out[k] = clean
+            continue
         if k == "captions":
             if not isinstance(v, bool):
                 raise ValueError("Captions must be on or off.")
@@ -335,6 +345,8 @@ def create(source: dict, options: dict, enqueue=True, creator=None, kind="video"
     # A new video takes a copy of the creator's current interaction style; an old job or template without one
     # keeps the built-in YouTube look.
     opts.setdefault("interaction_style", interaction_styles.for_creator(c))
+    if c:
+        opts.setdefault("custom_motions", creators.custom_motion_assets(c))
     if opts["min_len"] >= opts["max_len"]:
         opts["min_len"] = max(5, opts["max_len"] - 5)
     job = {"id": jid, "user": ctx.uid(), "kind": kind, "creator": creator, "dir": str(d), "created": time.time(), "source": source,
@@ -468,6 +480,8 @@ def _render_changes(job, clip, changes):
         new.update(clean_options({"interactions": changes["interactions"]}))
     if "interaction_style" in changes:
         new.update(clean_options({"interaction_style": changes["interaction_style"]}))
+    if "custom_motions" in changes:
+        new.update(clean_options({"custom_motions": changes["custom_motions"]}))
     if "captions" in changes:
         new.update(clean_options({"captions": changes["captions"]}))
     if "segments" in changes:
@@ -557,6 +571,18 @@ def _f(v):
         return -1.0
 
 
+def _custom_motion_paths(job, filenames) -> dict:
+    """Only approved files inside this creator's workspace may replace the built-in artwork."""
+    if not filenames or not job.get("creator") or not creators.get(job["creator"]):
+        return {}
+    folder = creators.root(job["creator"]) / "custom-motions"
+    out = {}
+    for action, name in filenames.items():
+        if re.fullmatch(r"motion-[a-z0-9]{10}\.webm", str(name)) and (folder / name).is_file():
+            out[action] = folder / name
+    return out
+
+
 def render_one(job, clip, words):
     d = Path(job["dir"])
     clip["status"] = "rendering"
@@ -565,11 +591,12 @@ def render_one(job, clip, words):
         language = clip.get("caption_language", job.get("caption_language", "en"))
         style = clip.get("interaction_style") or {}
         seal_avatar = interaction_styles.avatar_for(job.get("creator")) if style.get("seal") else None
+        custom = _custom_motion_paths(job, clip.get("custom_motions"))
         if clip.get("text_language", "en") != language and config.ai_ready():
             usage.set_context(job.get("creator"), job.get("title") or "")
             clip.update(brain.translate_clip_text(clip, language), text_language=language)
         if clip.get("segments"):
-            out = _render_sequence(job, clip, words, seal_avatar=seal_avatar)
+            out = _render_sequence(job, clip, words, seal_avatar=seal_avatar, custom_motions=custom)
         else:
             if not clip.get("src") and not job.get("source_path"):
                 _piece_again(job, clip)
@@ -583,7 +610,7 @@ def render_one(job, clip, words):
             speech = [dict(w, s=w["s"] - off, e=w["e"] - off) for w in words
                       if w["e"] > clip["start"] and w["s"] < clip["end"]]
             out = render.render_clip(src, d / "clips", clip["id"], local, near, job["width"], job["height"],
-                                     speech_words=speech, seal_avatar=seal_avatar)
+                                     speech_words=speech, seal_avatar=seal_avatar, custom_motions=custom)
         clip.update(out, status="done", version=clip.get("version", 0) + 1, error=None)
         post = {k: clip[k] for k in ("title", "description", "hashtags", "hook", "start", "end", "score")}
         if clip.get("segments"):
@@ -604,7 +631,7 @@ def render_one(job, clip, words):
     save(job)
 
 
-def _render_sequence(job, clip, words, seal_avatar=None):
+def _render_sequence(job, clip, words, seal_avatar=None, custom_motions=None):
     src, low, high = editor_source(job, clip)
     url = editor_remote(job)
     d = Path(job["dir"])
@@ -639,7 +666,7 @@ def _render_sequence(job, clip, words, seal_avatar=None):
         dimensions = job if job.get("width") and job.get("height") else media.probe(source)
         return render.render_clip(source, d / "clips", clip["id"], local, captions,
                                   dimensions["width"], dimensions["height"], segments=inputs, speech_words=speech,
-                                  seal_avatar=seal_avatar)
+                                  seal_avatar=seal_avatar, custom_motions=custom_motions)
 
 
 def _caption_words(job, clip, words, off):
@@ -1038,8 +1065,8 @@ def _run_job(job):
             c.update(id=f"clip{len(job['clips']) + 1:02d}", start=round(c["start"] + shift, 2),
                      end=round(c["end"] + shift, 2), style=o["style"], layout=o["layout"],
                      captions=o.get("captions", True), interactions=list(o.get("interactions", [])),
-                     interaction_style=o.get("interaction_style"), status="queued", version=0,
-                     text_language=job.get("caption_language", "en"))
+                     interaction_style=o.get("interaction_style"), custom_motions=o.get("custom_motions"),
+                     status="queued", version=0, text_language=job.get("caption_language", "en"))
             if o.get("hook_text"):        # the person's own big text, on every clip, in place of the AI's
                 c["hook"], c["fixed_hook"] = o["hook_text"], True
             if o.get("description_text"):  # ...and their own description, exactly as written

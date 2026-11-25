@@ -27,6 +27,7 @@ from . import account, load
 from . import (accounts, ai, alerts, auth, brain, config, creators, ctx, db, jobs, live, media, posting,
                profiles, render, safe, subscription, claude_account, transcribe, usage)
 from . import interaction_styles as ist
+from . import custom_motions as cm
 
 from . import tools as _tools  # noqa: E402
 
@@ -111,8 +112,10 @@ class Gate:
             # Only the upload may be big. Everything else is a small form, and is cut off at 256 KB whatever its
             # headers claim, so nobody can fill the server's memory by posting junk (signed in or not).
             piece = method == "PUT" and path.startswith("/api/upload/")
+            # A custom motion may carry one small picture for the AI to animate.
+            art = method == "POST" and path.endswith("/custom-motions/draft")
             cap = ((min(config.MAX_UPLOAD_MB, config.UPLOAD_PART_MB) if piece else config.MAX_UPLOAD_MB) + 8) * 1024 * 1024 \
-                if path == "/api/upload" or piece else 256 * 1024
+                if path == "/api/upload" or piece else (min(config.MAX_UPLOAD_MB, 8) + 1) * 1024 * 1024 if art else 256 * 1024
             try:
                 if int(req.headers.get("content-length") or 0) > cap:
                     return await deny(413, f"That file is too big. The limit is {config.MAX_UPLOAD_MB} MB." if path == "/api/upload" else "That request is too large.")
@@ -622,6 +625,7 @@ def status(request: Request):
             "tour": not accounts.settings()["tour_done"], "posting_timezone": time.strftime("%Z (UTC%z)"),
             "youtube": accounts.youtube_ready(), "connect": {p: accounts.can_connect(p) for p in accounts.PLATFORM_NAMES}, "max_upload_mb": config.MAX_UPLOAD_MB, "upload_part_mb": config.UPLOAD_PART_MB, "max_batch": config.MAX_ACTIVE_JOBS_PER_USER,
             "styles": {k: v["label"] for k, v in render.STYLES.items()}, "layouts": render.LAYOUTS, "speech": _speech_brief(),
+            "lottie": cm.checkout_status(accounts.settings().get("lottie_checkout", "")),
             "caption_language": accounts.settings()["caption_language"]}
 
 
@@ -1476,6 +1480,103 @@ def preview_interaction_style(request: Request, cid: str):
         except (OSError, RuntimeError, ValueError) as e:
             raise HTTPException(422, str(e) if isinstance(e, RuntimeError) else "The preview could not be made.")
     return FileResponse(f, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=86400"})
+
+
+@app.post("/api/creators/{cid}/custom-motions/draft")
+async def draft_custom_motion(cid: str, action: str = Form(""), description: str = Form(""),
+                              image_prompt: str = Form(""), has_image: str = Form("0"),
+                              language: str = Form("en"), image: UploadFile | None = File(None)):
+    """Ask the AI for a motion and render at least six real frames. Nothing is used in a clip yet."""
+    if not creators.get(cid):
+        raise HTTPException(404, "No such creator")
+    cm.cleanup_old_drafts(cid)
+    _throttle("cmotion:" + ctx.uid(), 20, 600, "That's a lot of motion ideas in a short time. Wait a few minutes.")
+    usage.set_context(cid, creators.get(cid).get("name") or "")
+    wants_image = has_image == "1"
+    picture = None
+    if wants_image:
+        if not image:
+            raise HTTPException(400, "Choose the picture you want animated.")
+        picture = await image.read(8 * 1024 * 1024 + 1)
+        if not picture or len(picture) > 8 * 1024 * 1024:
+            raise HTTPException(400, "That picture is too big. Use one under 8 MB.")
+    try:
+        brief = cm.ask_brief({"action": action, "description": description, "image_prompt": image_prompt,
+                              "has_image": wants_image, "language": language})
+        draft_ = cm.draft(cid, brief, picture, accounts.settings().get("lottie_checkout", ""))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except RuntimeError as e:
+        raise HTTPException(422, str(e))
+    except Exception:  # noqa: BLE001 - a broken renderer must not take the page down
+        raise HTTPException(422, "That motion could not be drawn. Try a shorter description.")
+    return draft_
+
+
+@app.get("/api/creators/{cid}/custom-motions/{did}/filmstrip")
+def custom_motion_filmstrip(cid: str, did: str):
+    if not creators.get(cid):
+        raise HTTPException(404, "No such creator")
+    try:
+        data = cm.filmstrip_data(cid, did)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return Response(content=data, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=86400"})
+
+
+@app.get("/api/creators/{cid}/custom-motions/{did}/frame/{name}")
+def custom_motion_frame(cid: str, did: str, name: str):
+    if not creators.get(cid):
+        raise HTTPException(404, "No such creator")
+    try:
+        data = cm.frame_jpeg(cid, did, name)
+    except (ValueError, OSError):
+        raise HTTPException(404, "No such frame")
+    return Response(content=data, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=86400"})
+
+
+@app.post("/api/creators/{cid}/custom-motions/{did}/approve")
+def approve_custom_motion(cid: str, did: str, body: dict = Body(default={})):
+    """Only after approval does PeakCut encode the WebM and switch this creator's motion to it."""
+    if not creators.get(cid):
+        raise HTTPException(404, "No such creator")
+    _throttle("cmotion:" + ctx.uid(), 30, 600)
+    try:
+        made = cm.approve(cid, did, accounts.settings().get("lottie_checkout", ""))
+        name = " ".join(str((body or {}).get("name") or "").split())[:40] or made["lottie"].get("nm", "Custom motion")
+        return creators.add_custom_motion(cid, {"id": made["id"], "action": made["lottie"]["nm"].split("/")[-1].strip(),
+                                                "name": name, "file": made["asset"].name,
+                                                "created": time.time(), "note": ""})
+    except KeyError:
+        raise HTTPException(404, "No such motion draft")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    finally:
+        cm.discard(cid, did)
+
+
+@app.post("/api/creators/{cid}/custom-motions/{did}/discard")
+def discard_custom_motion(cid: str, did: str):
+    cm.discard(cid, did)
+    return {"ok": True}
+
+
+@app.delete("/api/creators/{cid}/custom-motions/{mid}")
+def remove_custom_motion(cid: str, mid: str):
+    try:
+        return creators.delete_custom_motion(cid, mid)
+    except KeyError:
+        raise HTTPException(404, "No such custom motion")
+
+
+@app.put("/api/creators/{cid}/custom-motions/select")
+def select_custom_motion(cid: str, body: dict = Body(...)):
+    try:
+        return creators.select_custom_motion(cid, str(body.get("action") or ""), str(body.get("id") or ""))
+    except KeyError:
+        raise HTTPException(404, "No such custom motion")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
 
 @app.get("/api/creators")

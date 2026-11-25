@@ -13,8 +13,11 @@ SOUNDS = {
 ACTIONS = ("subscribe", "like", "comment", "share", "save")
 
 
-def plan(actions, duration, hook_y, cap_y, language="en", *, caption_style="clean") -> list:
-    """Image and sound use the same clip-relative clock, including shortened clips."""
+def plan(actions, duration, hook_y, cap_y, language="en", *, caption_style="clean", custom_motions=None) -> list:
+    """Image and sound use the same clip-relative clock, including shortened clips.
+
+    `custom_motions` maps an audience request to an approved WebM for that creator. It has the same shape and
+    length as the built-in artwork, so timing and sound stay exactly the same."""
     actions = list(dict.fromkeys(a for a in (actions or []) if isinstance(a, str) and a in ACTIONS))
     if not actions or duration <= .5:
         return []
@@ -50,7 +53,8 @@ def plan(actions, duration, hook_y, cap_y, language="en", *, caption_style="clea
                        "source_start": .15, "source_duration": .498, "rate": rate, "gain": .6})
         motions.append({"action": action, "start": start, "end": end, "rate": rate,
                         "x": (1080 - WIDTH) / 2, "y": top, "caption_y": cap_y,
-                        "asset": ASSETS / language / f"{action}.webm", "sounds": sounds})
+                        "asset": (Path(custom_motions[action]) if custom_motions and custom_motions.get(action)
+                                  else ASSETS / language / f"{action}.webm"), "sounds": sounds})
     return motions
 
 

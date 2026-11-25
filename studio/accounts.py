@@ -26,7 +26,7 @@ SECRET_KEYS = ("discord_webhook", "telegram_token")
 SETTING_DEFAULTS = {"discord_webhook": "", "telegram_token": "", "telegram_chat": "", "paused": False,
                     "digest_hour": 8, "last_digest": "", "tour_done": False, "caption_language": "en",
                     "youtube_auto_translate": True,
-                    "clip_templates": {}, "censorship_mode": "off", "censorship_words": ""}
+                    "clip_templates": {}, "censorship_mode": "off", "censorship_words": "", "lottie_checkout": ""}
 
 YT_SCOPES = "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly"
 IG = "https://graph.instagram.com"

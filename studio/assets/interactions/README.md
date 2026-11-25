@@ -16,6 +16,10 @@ node tools/build_interaction_motion.mjs <lottie-checkout> <ffmpeg-executable>
 
 The builder writes the runtime JSON/WebM files here and scenes under the player checkout's `public/projects/peakcut-pt-br` and `peakcut-en`. Each scene includes the bundled font for the official Skottie player. Node and CanvasKit are only needed when rebuilding; exporting clips needs Python and ffmpeg as before.
 
+## Custom motions
+
+A creator can also ask the AI for their own motion. `studio/custom_motions.py` turns a short brief into a Lottie scene, and `tools/render_custom_interaction.mjs` draws its frames with the same Skottie engine before encoding the approved WebM. Node and the checkout are only needed while making a motion; clips still play the WebM with ffmpeg alone. Set the checkout folder in Settings → Custom motions (or `PEAKCUT_LOTTIE_CHECKOUT`).
+
 The user supplied the three original MP3 files in `docs/efeitos-sonoros`. The builder copies them unchanged to `sounds/` so Docker and other installations do not depend on a personal folder:
 
 - `ribhavagrawal-woosh-230554.mp3`: every entrance.

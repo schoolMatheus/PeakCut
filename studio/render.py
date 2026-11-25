@@ -299,7 +299,7 @@ RENDER_SECONDS = 600      # one clip's video encode; far beyond normal, so a fro
 
 
 def render_clip(src: Path, out_dir: Path, name: str, clip: dict, words: list, src_w: int, src_h: int, *, segments=None,
-                speech_words=None, seal_avatar: bytes | None = None) -> dict:
+                speech_words=None, seal_avatar: bytes | None = None, custom_motions=None) -> dict:
     """Writes <name>.mp4, <name>.jpg and <name>.ass into out_dir. Returns file names."""
     out_dir.mkdir(parents=True, exist_ok=True)
     start, end = clip["start"], clip["end"]
@@ -319,7 +319,7 @@ def render_clip(src: Path, out_dir: Path, name: str, clip: dict, words: list, sr
     hook_y = _hook_y(layout, hook_y, face)
     motions = interactions.plan(clip.get("interactions"), end - start, hook_y, cap_y,
                                 clip.get("caption_language", clip.get("text_language", "en")),
-                                caption_style=clip.get("style", "bounce"))
+                                caption_style=clip.get("style", "bounce"), custom_motions=custom_motions)
     style = clip.get("interaction_style")
     if motions:
         cap_y = motions[0]["caption_y"]

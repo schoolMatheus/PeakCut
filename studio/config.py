@@ -202,6 +202,9 @@ MAX_VIDEO_HOURS = _limit("PEAKCUT_MAX_VIDEO_HOURS")              # longest video
 MAX_LIVE_HOURS = _limit("PEAKCUT_MAX_LIVE_HOURS")                # a recording stops by itself after this long
 MAX_USER_GB = _limit("PEAKCUT_MAX_USER_GB")                      # disk space one account may fill
 MAX_CREATORS = int(_limit("PEAKCUT_MAX_CREATORS"))               # creators one account may add
+# Where the separate diffusionstudio/lottie checkout lives, when custom audience motions are made. Only needed
+# while authoring a motion; exporting clips still needs Python and ffmpeg alone.
+LOTTIE_CHECKOUT = env("PEAKCUT_LOTTIE_CHECKOUT", "").strip()
 ALLOWED_SITES = tuple(s.strip().lower() for s in env(
     "PEAKCUT_ALLOWED_SITES", "youtube.com,youtu.be,twitch.tv,kick.com").split(",") if s.strip())
 

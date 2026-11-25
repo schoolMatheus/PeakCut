@@ -23,7 +23,8 @@ DEFAULTS = {"name": "", "channel": "", "style": "bounce", "layout": "blur", "cap
             "post_window_enabled": False, "post_start_time": "09:00", "post_end_time": "21:00",
             "post_windows": [], "post_fixed_times": [],
             "privacy": "public", "post_footer": "", "rate_per_1k": 0.0, "channels": {},
-            "lang": "en", "interactions": [], "interaction_styles": [], "interaction_style": ""}
+            "lang": "en", "interactions": [], "interaction_styles": [], "interaction_style": "",
+            "custom_motions": [], "custom_motion_selected": {}}
 PLATFORMS = ("youtube", "twitch", "kick")
 
 
@@ -39,6 +40,41 @@ def clean_interactions(value) -> list:
     if not isinstance(value, list) or any(not isinstance(action, str) or action not in ACTIONS for action in value):
         raise ValueError("Audience requests must be a list of valid actions.")
     return list(dict.fromkeys(value))
+
+
+MOTION_ID = re.compile(r"^motion-[a-z0-9]{10}$")
+
+
+def clean_custom_motions(value) -> list:
+    """Motions this creator approved: a small list of files under their own workspace."""
+    from .interactions import ACTIONS
+    if not isinstance(value, list):
+        raise ValueError("The custom motions must be a list.")
+    if len(value) > 20:
+        raise ValueError("You can keep up to 20 custom motions. Delete one first.")
+    out = []
+    for item in value:
+        if not isinstance(item, dict):
+            raise ValueError("That custom motion isn't valid.")
+        mid, file = str(item.get("id") or ""), str(item.get("file") or "")
+        action = str(item.get("action") or "")
+        if not MOTION_ID.fullmatch(mid) or file != mid + ".webm" or action not in ACTIONS:
+            raise ValueError("That custom motion isn't valid.")
+        name = " ".join("".join(ch if ch.isprintable() else " " for ch in str(item.get("name") or "")).split())[:40]
+        try:
+            created = float(item.get("created"))
+        except (TypeError, ValueError):
+            created = 0.0
+        out.append({"id": mid, "action": action, "name": name or action, "file": file, "created": created,
+                    "note": " ".join(str(item.get("note") or "").split())[:160]})
+    return out
+
+
+def clean_custom_motion_selected(value) -> dict:
+    from .interactions import ACTIONS
+    if not isinstance(value, dict):
+        raise ValueError("The chosen custom motions aren't valid.")
+    return {a: str(v) for a, v in value.items() if a in ACTIONS and isinstance(v, str) and MOTION_ID.fullmatch(v)}
 
 
 def clean_description(v) -> str:
@@ -69,6 +105,9 @@ def _fix(c: dict) -> dict:
     ids = {s.get("id") for s in c.get("interaction_styles") or []}
     if c.get("interaction_style") not in ids:
         c["interaction_style"] = ""      # the chosen style was deleted, or came from an older page: YouTube again
+    motions = {m.get("id") for m in c.get("custom_motions") or []}
+    c["custom_motion_selected"] = {a: mid for a, mid in (c.get("custom_motion_selected") or {}).items()
+                                   if mid in motions}
     return c
 NUMERIC = {"min_len": (5, 120), "max_len": (10, 180), "max_clips": (1, 20), "min_score": (0, 100), "buffer_min": (5, 120), "live_per_hour": (1, 60), "ai_every_min": (1, 30), "auto_jump_pct": (20, 300), "must_clip_min": (0, 240), "min_gap_min": (0, 60),
            "post_min_score": (0, 100), "post_gap_min": (5, 1440), "daily_cap": (1, 50)}
@@ -134,6 +173,14 @@ def _clean(data: dict) -> dict:
                 if not isinstance(v, str) or (v and not re.fullmatch(r"[a-z0-9][a-z0-9\-]{2,23}", v)):
                     raise ValueError("That interaction style isn't valid.")
                 out[k] = v
+            continue
+        if k == "custom_motions":
+            if k in data:
+                out[k] = clean_custom_motions(data[k])
+            continue
+        if k == "custom_motion_selected":
+            if k in data:
+                out[k] = clean_custom_motion_selected(data[k])
             continue
         if k == "post_windows":
             if k in data:
@@ -348,6 +395,73 @@ def select_interaction_style(cid, sid: str) -> dict:
         c["interaction_style"] = sid or ""
         _write(c)
     return c
+
+
+def add_custom_motion(cid, data: dict) -> dict:
+    """Keep an approved motion and use it for its audience request from now on."""
+    with _lock:
+        c = get(cid)
+        if not c:
+            raise KeyError(cid)
+        record = clean_custom_motions([data])[0]
+        motions = [m for m in c.get("custom_motions") or [] if m["id"] != record["id"]]
+        if len(motions) >= 20:
+            raise ValueError("You can keep up to 20 custom motions. Delete one first.")
+        chosen = dict(c.get("custom_motion_selected") or {})
+        chosen[record["action"]] = record["id"]
+        c["custom_motions"] = [*motions, record]
+        c["custom_motion_selected"] = chosen
+        _write(c)
+    return c
+
+
+def delete_custom_motion(cid, mid: str) -> dict:
+    with _lock:
+        c = get(cid)
+        if not c:
+            raise KeyError(cid)
+        motions = [m for m in c.get("custom_motions") or [] if m["id"] != mid]
+        if len(motions) == len(c.get("custom_motions") or []):
+            raise KeyError(mid)
+        chosen = {a: v for a, v in (c.get("custom_motion_selected") or {}).items() if v != mid}
+        c["custom_motions"] = motions
+        c["custom_motion_selected"] = chosen
+        _write(c)
+    folder = root(cid) / "custom-motions"
+    for suffix in (".webm", ".json"):
+        (folder / (mid + suffix)).unlink(missing_ok=True)
+    return c
+
+
+def select_custom_motion(cid, action: str, mid: str) -> dict:
+    from .interactions import ACTIONS
+    if action not in ACTIONS:
+        raise ValueError("Choose one of the audience requests.")
+    with _lock:
+        c = get(cid)
+        if not c:
+            raise KeyError(cid)
+        motions = {m["id"]: m for m in c.get("custom_motions") or []}
+        if mid and (mid not in motions or motions[mid]["action"] != action):
+            raise KeyError(mid)
+        chosen = dict(c.get("custom_motion_selected") or {})
+        if mid:
+            chosen[action] = mid
+        else:
+            chosen.pop(action, None)
+        c["custom_motion_selected"] = chosen
+        _write(c)
+    return c
+
+
+def custom_motion_assets(c) -> dict:
+    """Which custom WebM replaces each built-in motion on this creator's next videos."""
+    motions = {m["id"]: m for m in (c.get("custom_motions") or [])}
+    out = {}
+    for action, mid in (c.get("custom_motion_selected") or {}).items():
+        if mid in motions:
+            out[action] = motions[mid]["file"]
+    return out
 
 
 def set_profiles(cid, profiles: dict, extra: dict = None):
