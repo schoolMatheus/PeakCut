@@ -136,6 +136,30 @@ got = media.info(YT)
 media._ydl = real
 check("a link's details come through another way when the plain one is refused", (got["title"], got["duration"], len(calls)), ("T", 61.0, 2))
 
+# a client can answer the page but offer no playable format: try the next way, and explain if none works
+reset()
+NO_VIDEO = RuntimeError("ERROR: [youtube] abc: Requested format is not available. Use --list-formats")
+
+
+def no_format(x):
+    if not x.get("extractor_args"):
+        raise NO_VIDEO
+    return "apps"
+
+
+check("no playable format here: the next way is tried", media._yt(YT, no_format), "apps")
+reset()
+try:
+    media._yt(YT, lambda x: (_ for _ in ()).throw(NO_VIDEO))
+    got = "answered"
+except Exception as e:  # noqa: BLE001
+    got = str(e)
+check("no way offers a video: plain words, not a raw yt-dlp error", got, media.NO_FORMAT)
+
+# signed-in downloads need a JavaScript runtime; yt-dlp enables deno, PeakCut adds what else is installed
+check("a JavaScript runtime is handed to yt-dlp", media._js_runtimes(), lambda r: isinstance(r, dict) and "deno" in r)
+check("the runtime is part of the yt-dlp options", media._ydl({}).params.get("js_runtimes"), lambda r: bool(r))
+
 print()
 print("ALL PASSED" if not fails else f"{len(fails)} FAILED: {fails}")
 sys.exit(1 if fails else 0)

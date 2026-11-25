@@ -36,13 +36,14 @@ def _routes() -> list:
 
 
 def _yt(url, work):
-    """work(extra yt-dlp options) for a link. For YouTube, every route is tried in turn until one is not refused."""
+    """work(extra yt-dlp options) for a link. For YouTube, every route is tried in turn until one works."""
     global _yt_refused_until, _ROUTE_LAST
     if not is_youtube(url):
         return work({})
     check_youtube(url)
     now = time.time()
     tried = 0
+    format_errors = []
     for name, extra in _routes():
         if _ROUTE_REFUSED.get(name, 0) > now:
             continue
@@ -56,12 +57,20 @@ def _yt(url, work):
                 time.sleep(3)
                 got = work(extra)
         except Exception as e:  # noqa: BLE001
+            # a client can hand over the page but offer no playable format (the others may still have one)
+            if _FORMAT_MISSING.search(str(e)):
+                format_errors.append(e)
+                _ROUTE_REFUSED[name] = time.time() + YT_PAUSE
+                continue
             if _BOT_CHECK.search(str(e)) or _DATA_REFUSED.search(str(e)) or (extra.get("proxy") and _PROXY_DOWN.search(str(e))):
                 _ROUTE_REFUSED[name] = time.time() + YT_PAUSE
                 continue
             raise
         _ROUTE_LAST = name
         return got
+    # every way gave no playable format: say what to do instead of blaming the network
+    if format_errors and len(format_errors) == tried:
+        raise RuntimeError(NO_FORMAT) from format_errors[-1]
     # every way is refused right now: turn YouTube links away for a little while instead of each one waiting to fail
     _yt_refused_until = time.time() + (YT_PAUSE if tried else 60)
     raise YouTubeBlocked(YT_BLOCKED)
@@ -75,6 +84,11 @@ _BOT_CHECK = re.compile(r"not a bot|confirm you.?re not|sign in to confirm(?! yo
 # YouTube can also hand over the page and then refuse the video itself ("unable to download video data:
 # HTTP Error 403: Forbidden"): that is a refusal too, so the next way is tried
 _DATA_REFUSED = re.compile(r"HTTP Error 403|403: Forbidden|ffmpeg exited with code 8", re.I)   # a stretch of a video comes through ffmpeg, which reports the same refusal this way
+# A client can answer with the page but hand over no playable video at all (only thumbnails/storyboards). That
+# happens when signed-in cookies are sent without a JavaScript runtime, and on clients YouTube has clamped down.
+_FORMAT_MISSING = re.compile(r"Requested format is not available|No video formats found|Only images are available", re.I)
+NO_FORMAT = ("YouTube offered no playable video from this server. Install a JavaScript runtime (Deno or Node.js) "
+             "on the server and restart PeakCut, or upload the video file instead.")
 
 
 class YouTubeBlocked(RuntimeError):
@@ -136,12 +150,25 @@ def cookie_opts() -> dict:
     return {"cookiefile": str(config.YT_COOKIES)} if config.YT_COOKIES.is_file() else {}
 
 
+def _js_runtimes() -> dict:
+    """YouTube asks a signed-in browser to solve a little JavaScript puzzle before handing over a video. yt-dlp
+    needs a JavaScript runtime for that or it gets only thumbnails and says the format is not available. It turns
+    on deno by itself; add node or bun when they are installed here (on Windows, Node.js is the usual one)."""
+    import shutil
+    out = {"deno": {}}
+    for name in ("node", "bun"):
+        if shutil.which(name):
+            out[name] = {}
+    return out
+
+
 def _ydl(opts):
     import yt_dlp
     # a channel or playlist link is answered as "a list" straight away, never walked video by video
     return yt_dlp.YoutubeDL({"noplaylist": True, "quiet": True, "no_warnings": True, "logger": _Quiet(),
                              "extract_flat": "in_playlist", "playlistend": 1, "socket_timeout": 20,
-                             "concurrent_fragment_downloads": 4, **cookie_opts(), **opts})
+                             "concurrent_fragment_downloads": 4, "js_runtimes": _js_runtimes(),
+                             **cookie_opts(), **opts})
 
 
 def _video_format(height):
