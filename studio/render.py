@@ -115,8 +115,9 @@ def _groups(words, per):
 
 def geometry(src_w, src_h, layout):
     """Where the video sits in the 1080x1920 frame, and where hook and captions go."""
-    if src_h >= src_w and layout != "crop":
+    if src_h >= src_w and layout not in ("crop", "facecam_top"):
         layout = "crop"  # already vertical or square: nothing to gain from a blurred fill
+                         # (the facecam layout is a split, so it keeps its two halves)
     if layout not in LAYOUTS:
         layout = "blur"
     if layout in ("blur", "fit"):
@@ -243,19 +244,34 @@ PIP_W = 380            # how wide the facecam is in the 1080-wide frame
 PIP_MARGIN = 26
 
 
+def _face_box(facecam):
+    """The webcam's box in the source, or None when it is missing or too small to cut out."""
+    if facecam and len(facecam) == 4:
+        try:
+            x, y, w, h = (int(v) for v in facecam)
+            if w > 8 and h > 8:
+                return x, y, w, h
+        except (TypeError, ValueError):
+            pass
+    return None
+
+
 def _filter(layout, fg_h, facecam=None, source="0:v"):
-    if layout == "facecam_top" and facecam:
+    if layout == "facecam_top":
         # The webcam sits in the top half and the whole game fills the bottom half, so a viewer sees
-        # the face and the play at once without either covering the other.
-        fx, fy, fw, fh = (int(v) for v in facecam)
-        if fw > 8 and fh > 8:
-            half = H // 2
-            return (f"[{source}]fps={config.OUT_FPS},split=2[base][fc];"
-                    f"[base]scale={W}:{half}:force_original_aspect_ratio=decrease,"
-                    f"pad={W}:{half}:(ow-iw)/2:(oh-ih)/2:black,setsar=1[b];"
+        # the face and the play at once without either covering the other. The split stays even when
+        # no webcam was found: the top of the picture takes its place, and the whole game is still below.
+        half = H // 2
+        fit = (f"scale={W}:{half}:force_original_aspect_ratio=decrease,"
+               f"pad={W}:{half}:(ow-iw)/2:(oh-ih)/2:black,setsar=1")
+        head = f"[{source}]fps={config.OUT_FPS},split=2[base][fc];[base]{fit}[b];"
+        box = _face_box(facecam)
+        if box:
+            fx, fy, fw, fh = box
+            return (head +
                     f"[fc]crop={fw}:{fh}:{fx}:{fy},scale={W}:{half}:force_original_aspect_ratio=increase,"
-                    f"crop={W}:{half},setsar=1[p];"
-                    f"[p][b]vstack,setsar=1[v0];")
+                    f"crop={W}:{half},setsar=1[p];[p][b]vstack,setsar=1[v0];")
+        return head + f"[fc]crop=iw:ih/2:0:0,{fit}[p];[p][b]vstack,setsar=1[v0];"
     if layout == "gameplay" and facecam:
         # The game fills the screen, and the webcam sits in the top corner of it, so a viewer sees
         # the play and the face at the same time.
@@ -314,8 +330,9 @@ def render_clip(src: Path, out_dir: Path, name: str, clip: dict, words: list, sr
         hook = censorship.mask_text(hook, listed)
     layout, fg_h, hook_y, cap_y = geometry(src_w, src_h, clip.get("layout", "blur"))
     face = clip.get("facecam")
-    if layout in ("gameplay", "facecam_top") and not (face and len(face) == 4):
+    if layout == "gameplay" and not _face_box(face):
         layout = "crop"     # no webcam found: the game fills the screen, which is still the right shape
+                            # facecam_top keeps its split even then, so it never turns into a fullscreen clip
     hook_y = _hook_y(layout, hook_y, face)
     motions = interactions.plan(clip.get("interactions"), end - start, hook_y, cap_y,
                                 clip.get("caption_language", clip.get("text_language", "en")),
