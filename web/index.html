@@ -258,8 +258,13 @@ label.ck input{accent-color:var(--brand);margin:0}
 .cm-list{display:flex;flex-direction:column;gap:6px;margin:0;padding:0;list-style:none}
 .cm-list li{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--line-2);border-radius:var(--r);background:#fff;font-size:13px}
 .cm-list li .grow{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.cm-strip{display:block;width:100%;height:auto;border:1px solid var(--line-2);border-radius:var(--r);background:var(--muted)}
+.cm-strip{display:block;width:100%;height:auto;border:1px solid var(--line-2);border-radius:var(--r);background:var(--muted);cursor:zoom-in}
 .cm-note{margin:0;color:var(--dim)}
+.imgdlg{padding:0;border:0;background:transparent;max-width:min(96vw,1200px);width:auto}
+.imgdlg::backdrop{background:rgba(0,0,0,.72)}
+.imgdlg .imgdlg-inner{position:relative;background:#111;border-radius:var(--r);padding:12px}
+.imgdlg img{display:block;max-width:92vw;max-height:86vh;width:auto;height:auto;border-radius:8px}
+.imgdlg .imgdlg-close{position:absolute;top:8px;right:8px;background:rgba(255,255,255,.92);color:#111}
 .fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:18px}
 .span{grid-column:1/-1}
 .time-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 8px}
@@ -960,6 +965,7 @@ dialog[open]{animation:fadein .16s ease}
 </div>
 <dialog id="clipdlg" aria-labelledby="edit-title"></dialog>
 <dialog id="formdlg"></dialog>
+<dialog id="imgdlg" class="imgdlg" aria-label="Image preview"><div class="imgdlg-inner"><button type="button" class="btn sm icon imgdlg-close" id="imgdlg-close" aria-label="Close"><svg class="i"><use href="#i-x"/></svg></button><img id="imgdlg-img" alt=""></div></dialog>
 <input type="file" id="file" accept="video/*" multiple hidden>
 <div id="toasts" role="status" aria-live="polite"></div>
 <div class="pop" id="bellpop" role="dialog" aria-label="Notifications" hidden></div>
@@ -1741,8 +1747,10 @@ async function openCustomMotion(given) {
     </div>
     <div id="cm_review" hidden>
       <h3>${i18n.html("Check the motion")}</h3>
-      <img class="cm-strip" id="cm_strip" alt="${esc(i18n.t("Preview"))}">
-      <p class="help">${i18n.html("These are real frames of the animation, in order. Approve only if the movement is what you asked for.")}</p>
+      <button type="button" class="cm-strip-btn" id="cm_expand" style="padding:0;border:0;background:transparent;width:100%;cursor:zoom-in" aria-label="${esc(i18n.t("Expand image"))}" title="${esc(i18n.t("Expand image"))}">
+        <img class="cm-strip" id="cm_strip" alt="${esc(i18n.t("Preview"))}">
+      </button>
+      <p class="help">${i18n.html("These are real frames of the animation, in order. Click the image to expand it. Approve only if the movement is what you asked for.")}</p>
     </div>
     <div class="row" style="flex-wrap:wrap;gap:8px">
       <button type="button" class="btn primary" id="cm_create"${lottie.ready ? "" : " disabled"}>${ic("bolt")}${i18n.html("Draw the motion with AI")}</button>
@@ -1780,6 +1788,10 @@ async function openCustomMotion(given) {
       dlg.close(); await tick(); toast(i18n.t("Custom motion deleted"), "ok");
     } catch (err) { toast(err.message, "bad"); b.disabled = false; }
   }));
+  s("#cm_expand").addEventListener("click", () => {
+    const src = s("#cm_strip").getAttribute("src");
+    if (src) openImagePreview(src, i18n.t("Custom motion preview"));
+  });
   const create = async () => {
     if (busy) return;
     const wants = s("#cm_has_image").checked, file = s("#cm_image").files[0];
@@ -1861,6 +1873,17 @@ function choice(id, items, val, disabled = false) {
     `<button type="button" class="tile-o" data-seg="${id}" data-v="${esc(x.v)}" aria-pressed="${String(x.v) === String(val)}"${captions ? " data-caption-style" : ""}${disabled ? " disabled" : ""}${x.title ? ` title="${esc(x.title)}"` : ""}>${x.prev}${esc(i18n.t(x.label))}</button>`).join("")}</div>`;
 }
 const closePicks = except => $$(".pick.open").forEach(p => { if (p !== except) { p.classList.remove("open"); p.querySelector(".pick-btn").setAttribute("aria-expanded", "false"); } });
+function openImagePreview(src, alt) {
+  const dlg = $("#imgdlg"), img = $("#imgdlg-img");
+  if (!dlg || !img || !src) return;
+  img.src = src;
+  img.alt = alt || i18n.t("Preview");
+  dlg.showModal();
+}
+$("#imgdlg-close")?.addEventListener("click", () => $("#imgdlg")?.close());
+$("#imgdlg")?.addEventListener("click", e => {
+  if (e.target === e.currentTarget) e.currentTarget.close();
+});
 function selectSegment(id, value) {
   const buttons = $$(`[data-seg="${id}"]`);
   if (!buttons.some(b => b.dataset.v === String(value))) return;
