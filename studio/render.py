@@ -130,7 +130,7 @@ def geometry(src_w, src_h, layout):
     if layout in _FILLS:
         return layout, fg_h, 300, 1380
     if layout == "facecam_top":
-        return layout, fg_h, H // 2 + 120, 1640   # heading just under the seam, captions low over the game
+        return layout, fg_h, FACECAM_TOP_H + 120, 1640   # heading just under the seam, captions low over the game
     if layout == "split":
         return layout, fg_h, 230, H // 2        # captions sit on the line between the two people
     return layout, fg_h, max(230, top - 190), min(1640, top + fg_h + 180)
@@ -242,6 +242,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
 PIP_W = 380            # how wide the facecam is in the 1080-wide frame
 PIP_MARGIN = 26
+FACECAM_TOP_H = int(H * 0.4)   # the facecam's part: a fifth smaller than half the frame
 
 
 def _face_box(facecam):
@@ -258,19 +259,21 @@ def _face_box(facecam):
 
 def _filter(layout, fg_h, facecam=None, source="0:v"):
     if layout == "facecam_top":
-        # The webcam sits in the top half and the whole game fills the bottom half, so a viewer sees
+        # The webcam sits in the top part and the whole game fills the rest, so a viewer sees
         # the face and the play at once without either covering the other. The split stays even when
         # no webcam was found: the top of the picture takes its place, and the whole game is still below.
-        half = H // 2
-        fit = (f"scale={W}:{half}:force_original_aspect_ratio=decrease,"
-               f"pad={W}:{half}:(ow-iw)/2:(oh-ih)/2:black,setsar=1")
-        head = f"[{source}]fps={config.OUT_FPS},split=2[base][fc];[base]{fit}[b];"
+        top, bottom = FACECAM_TOP_H, H - FACECAM_TOP_H
+        fit = (f"scale={W}:{top}:force_original_aspect_ratio=decrease,"
+               f"pad={W}:{top}:(ow-iw)/2:(oh-ih)/2:black,setsar=1")
+        game = (f"scale={W}:{bottom}:force_original_aspect_ratio=decrease,"
+                f"pad={W}:{bottom}:(ow-iw)/2:(oh-ih)/2:black,setsar=1")
+        head = f"[{source}]fps={config.OUT_FPS},split=2[base][fc];[base]{game}[b];"
         box = _face_box(facecam)
         if box:
             fx, fy, fw, fh = box
             return (head +
-                    f"[fc]crop={fw}:{fh}:{fx}:{fy},scale={W}:{half}:force_original_aspect_ratio=increase,"
-                    f"crop={W}:{half},setsar=1[p];[p][b]vstack,setsar=1[v0];")
+                    f"[fc]crop={fw}:{fh}:{fx}:{fy},scale={W}:{top}:force_original_aspect_ratio=increase,"
+                    f"crop={W}:{top},setsar=1[p];[p][b]vstack,setsar=1[v0];")
         return head + f"[fc]crop=iw:ih/2:0:0,{fit}[p];[p][b]vstack,setsar=1[v0];"
     if layout == "gameplay" and facecam:
         # The game fills the screen, and the webcam sits in the top corner of it, so a viewer sees

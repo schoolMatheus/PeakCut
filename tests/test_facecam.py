@@ -146,7 +146,8 @@ try:
     f = render._filter("facecam_top", 1920, [0, 0, 300, 170])
     check("the facecam is cropped out of the source", "crop=300:170:0:0" in f, True)
     check("the two halves are stacked", "vstack" in f and "split=2" in f, True)
-    check("the whole game sits below the facecam", "scale=1080:960" in f, True)
+    check("the facecam is a fifth smaller than half the screen", f"scale=1080:{render.FACECAM_TOP_H}" in f, True)
+    check("the whole game sits below the facecam", f"scale=1080:{render.H - render.FACECAM_TOP_H}" in f, True)
     check("the layout is offered to the user", "facecam_top" in render.LAYOUTS, True)
     f = render._filter("facecam_top", 1920, None)
     check("without a facecam the picture is still split", "vstack" in f and "split=2" in f, True)
@@ -156,7 +157,7 @@ try:
     check("a box too small to use still keeps the split", "vstack" in f, True)
     check("a vertical source keeps the facecam split", render.geometry(720, 1280, "facecam_top")[0], "facecam_top")
     check("a square source keeps the facecam split", render.geometry(720, 720, "facecam_top")[0], "facecam_top")
-    check("the heading sits below the seam", render.geometry(1920, 1080, "facecam_top")[2], render.H // 2 + 120)
+    check("the heading sits below the seam", render.geometry(1920, 1080, "facecam_top")[2], render.FACECAM_TOP_H + 120)
 finally:
     shutil.rmtree(work, ignore_errors=True)      # the pictures are big; they must not be left behind
 
