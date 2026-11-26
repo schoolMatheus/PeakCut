@@ -61,6 +61,17 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual(json.loads(text), {"style": "bold"})
         self.assertEqual(images, [png])
 
+    def test_svg_markup_is_kept_for_later_conversion(self):
+        lines = [
+            {"type": "item.completed", "item": {"type": "agent_message", "text": '{"style":"bold"}'}},
+            {"type": "item.completed", "item": {"type": "image_generation_call", "status": "completed",
+                                                "result": '<svg xmlns="http://www.w3.org/2000/svg"><circle r="4"/></svg>'}},
+            {"type": "turn.completed", "usage": {"input_tokens": 10, "output_tokens": 2}},
+        ]
+        result = subprocess.CompletedProcess([], 0, "\n".join(json.dumps(x) for x in lines), "")
+        _text, _sent, _wrote, images = codex._answer(result, True)
+        self.assertTrue(images[0].startswith(b"<svg"))
+
     def test_json_answer_usage_and_stdin(self):
         prompt = "ação " + "x" * 40000 + " $(do-not-run)"
         self.assertEqual(codex.run("default", prompt), ('{"items":["ok"]}', 20, 3))

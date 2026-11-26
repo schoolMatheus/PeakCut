@@ -49,9 +49,10 @@ MOTION_SCHEMA = {
         "card_shape": {"type": "STRING"},
         "motion_feel": {"type": "STRING"},
         "beats": {"type": "STRING"},
+        "extras": {"type": "STRING"},
     },
     "required": ["style", "background", "ink", "accent", "detail", "image_action", "label", "note",
-                 "action_style", "card_shape", "motion_feel", "beats"],
+                 "action_style", "card_shape", "motion_feel", "beats", "extras"],
 }
 
 PROMPT = """You are the art director for two short motions that will play together in a vertical video. Both are 800x240,
@@ -75,12 +76,14 @@ Answer with one JSON object and nothing else:
   "accent":"#rrggbb","detail":"#rrggbb","image_action":"one of wave, jump, spin, enter, pop, cry, laugh",
   "label":"short call to action, at most 22 characters","note":"one short sentence in {language} describing the six new drawings",
   "action_style":"one of bold, clean, playful","card_shape":"one of rounded, pill, square",
-  "motion_feel":"one of snappy, bouncy, calm","beats":"six short comma-separated descriptions of the character's six new drawings"}}
+  "motion_feel":"one of snappy, bouncy, calm","beats":"six short comma-separated descriptions of the character's six new drawings",
+  "extras":"one of none, stars, sparkles, confetti, waves, hearts"}}
 
 {palette_line}
 
 Rules:
 - background is the dark card, ink is readable text, accent is the bright highlight, detail is a quiet second color for outlines and small marks.
+- extras must come from the person's description of the action motion. It is the small decorative touch they asked for: stars, sparkles, confetti, waves or hearts. Use none when they asked for nothing extra.
 - action_style, card_shape and motion_feel must come from the person's description of the action motion. Bold uses heavy marks and strong contrast; clean uses thin outlines and calm motion; playful uses soft round shapes and a small bounce. Rounded, pill and square change the card corners. Snappy, bouncy and calm change the timing.
 - image_action is the behavior the new drawings must show across the beats:
   wave = friendly side-to-side greeting with a raised hand; jump = excited bounce with a changing pose;
@@ -132,6 +135,8 @@ def clean_brief(value) -> dict:
             "card_shape": shape if shape in ("rounded", "pill", "square") else "rounded",
             "motion_feel": feel if feel in ("snappy", "bouncy", "calm") else "snappy",
             "beats": _text(value.get("beats"), 240),
+            "extras": str(value.get("extras") or "none") if str(value.get("extras") or "none") in
+                      ("none", "stars", "sparkles", "confetti", "waves", "hearts") else "none",
             "character_color": _color(value.get("character_color"), _color(value.get("accent"), "#ff4d4d")),
             "has_image": has_image, "language": language}
 
@@ -184,7 +189,7 @@ def ask_brief(value: dict, images_out: list | None = None) -> dict:
     parsed = _answer(got)
     merged = {**brief, **{k: parsed.get(k) for k in ("style", "background", "ink", "accent",
                                                      "image_action", "label", "note", "action_style",
-                                                     "card_shape", "motion_feel", "beats")}}
+                                                     "card_shape", "motion_feel", "beats", "extras")}}
     if palette:
         # A chosen palette wins: the AI may only decide the drawing and the words.
         for key in ("background", "ink", "accent", "detail"):
@@ -265,6 +270,32 @@ def _motion_for(behavior):
                 "r": _animated([(0, -4), (38, 4), (74, 0), (119, 0)])}
     return {"s": _animated([(0, [70, 70, 100]), (20, [114, 114, 100]), (38, [96, 96, 100]),
                             (54, [100, 100, 100]), (119, [100, 100, 100])])}
+
+
+def _extras_shapes(extras, accent, detail):
+    """The small decoration the person actually asked for, drawn in the chosen palette."""
+    shapes = []
+    if extras == "stars":
+        for x in (300, 520, 640):
+            star = [[x, 95], [x + 5, 106], [x + 17, 108], [x + 8, 116], [x + 11, 128],
+                    [x, 121], [x - 11, 128], [x - 8, 116], [x - 17, 108], [x - 5, 106]]
+            shapes += [_path(star), _fill(accent)]
+    elif extras == "sparkles":
+        for x in (300, 540, 650):
+            shapes += [_path([[x, 96], [x, 126]], False), _stroke(accent, 4),
+                       _path([[x - 15, 111], [x + 15, 111]], False), _stroke(detail, 4)]
+    elif extras == "confetti":
+        for i, x in enumerate((280, 320, 560, 620, 660)):
+            shapes += [_rect(x, 96 + (i % 2) * 20, 10, 10, 2), _fill(accent if i % 2 else detail)]
+    elif extras == "waves":
+        for x in (300, 600):
+            shapes += [_path([[x, 108], [x + 10, 102], [x + 20, 108], [x + 30, 102], [x + 40, 108]], False),
+                       _stroke(detail, 4)]
+    elif extras == "hearts":
+        for x in (300, 620):
+            shapes += [_path([[x, 108], [x - 8, 98], [x - 18, 104], [x, 122], [x + 18, 104], [x + 8, 98]]),
+                       _fill(accent)]
+    return shapes
 
 
 def build_lottie(brief: dict, kind: str, image_names=None) -> dict:
@@ -360,8 +391,10 @@ def build_lottie(brief: dict, kind: str, image_names=None) -> dict:
         }
         add("Action symbol", [_path(symbols[brief["action"]]), _fill(accent)], 10, 108,
             {"o": _animated([(10, 0), (20, 100), (100, 100), (108, 0)], feel)})
-        add("Detail mark", [_rect(400, 166, 560 if style != "clean" else 420, 5, 3), _fill(detail)], 14, 106,
-            {"o": _animated([(14, 0), (24, 100), (98, 100), (106, 0)], "calm")})
+        extras = _extras_shapes(brief["extras"], accent, detail)
+        if extras:
+            add("Requested detail", extras, 14, 106,
+                {"o": _animated([(14, 0), (24, 100), (98, 100), (106, 0)], "calm")})
         tick = [[590, 120], [600, 132], [622, 104]]
         add("Confirmation", [_path(tick, False), _stroke(accent, 8 if style == "bold" else 6)], 86, FRAMES,
             {"o": _animated([(86, 0), (94, 100), (119, 100)], feel)})
@@ -488,10 +521,21 @@ def draft(cid: str, brief: dict, image: bytes, checkout: str, generated=None) ->
     image_names = []
     for i, data in enumerate((generated or [])[:6]):
         try:
-            picture = Image.open(io.BytesIO(data)).convert("RGBA")
-            picture.thumbnail((220, 220), Image.LANCZOS)
             name = f"pose-{i}.png"
-            picture.save(folder / name, "PNG")
+            target = folder / name
+            if data[:4] != b"\x89PNG":
+                source = folder / f"pose-{i}.svg"
+                source.write_bytes(data)
+                script = Path(__file__).resolve().parent.parent / "tools" / "svg_to_png.mjs"
+                done = subprocess.run(["node", str(script), status["checkout"], str(source), str(target)],
+                                      capture_output=True, text=True, encoding="utf-8", errors="replace",
+                                      creationflags=NO_WINDOW, timeout=120)
+                if done.returncode != 0 or not target.is_file():
+                    raise ValueError((done.stderr or "The drawing could not be saved as PNG.").strip()[-200:])
+                source.unlink(missing_ok=True)
+            picture = Image.open(target).convert("RGBA")
+            picture.thumbnail((220, 220), Image.LANCZOS)
+            picture.save(target, "PNG")
             image_names.append(name)
         except Exception:  # noqa: BLE001 - a bad picture is skipped, the vector fallback still works
             pass

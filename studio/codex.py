@@ -226,13 +226,18 @@ def _answer(result, collect_images=False):
             if collect_images and isinstance(item, dict) and "image" in str(item.get("type") or "").lower():
                 raw = item.get("result") or item.get("b64_json") or item.get("image") or item.get("output") or ""
                 if isinstance(raw, str) and raw.strip():
-                    encoded = raw.split(",", 1)[1] if raw.strip().startswith("data:") else raw
-                    try:
-                        image = base64.b64decode(encoded, validate=False)
-                        if image[:4] == b"\x89PNG":
-                            images.append(image)
-                    except Exception:  # noqa: BLE001 - a malformed image is simply ignored
-                        pass
+                    value = raw.strip()
+                    if "<svg" in value[:200].lower() or "<?xml" in value[:200].lower():
+                        decoded = value.encode("utf-8")
+                    else:
+                        encoded = value.split(",", 1)[1] if ";base64," in value else value
+                        try:
+                            decoded = base64.b64decode(encoded, validate=False)
+                        except Exception:  # noqa: BLE001 - markup may arrive as plain text
+                            decoded = value.encode("utf-8")
+                    head = decoded[:200].lower()
+                    if decoded[:4] == b"\x89PNG" or b"<svg" in head or b"<?xml" in head:
+                        images.append(decoded)
                 saved = item.get("path") or item.get("local_path") or ""
                 if saved and Path(saved).is_file():
                     images.append(Path(saved).read_bytes())
@@ -330,12 +335,13 @@ def recent_images(minutes=10, limit=6) -> list[bytes]:
         return []
     cutoff = time.time() - minutes * 60
     files = []
-    for path in root.rglob("*.png"):
-        try:
-            if path.stat().st_mtime >= cutoff:
-                files.append(path)
-        except OSError:
-            pass
+    for pattern in ("*.png", "*.svg"):
+        for path in root.rglob(pattern):
+            try:
+                if path.stat().st_mtime >= cutoff:
+                    files.append(path)
+            except OSError:
+                pass
     files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
     out = []
     for path in files[:limit]:

@@ -62,6 +62,20 @@ class MotionRules(unittest.TestCase):
         self.assertEqual(sum(1 for l in doc["layers"] if l["ty"] == 2), 6)
         self.assertEqual([l["ip"] for l in sorted(doc["layers"], key=lambda l: l["ip"])], [0, 20, 40, 60, 80, 100])
 
+    def test_action_uses_the_chosen_palette_and_the_requested_decoration(self):
+        chosen = brief(background="#123456", ink="#ffffff", accent="#00ff00", detail="#ff00ff", extras="stars")
+        doc = cm.build_lottie(cm.clean_brief(chosen), "action")
+        self.assertTrue(any(l["nm"] == "Requested detail" for l in doc["layers"]))
+        colors = set()
+        for layer in doc["layers"]:
+            for shape in layer.get("shapes", []):
+                color = shape.get("c", {}).get("k")
+                if isinstance(color, list) and len(color) == 4:
+                    colors.add(tuple(round(float(v), 3) for v in color))
+        self.assertIn((0.071, 0.204, 0.337, 1.0), colors)   # #123456 card
+        self.assertIn((0.0, 1.0, 0.0, 1.0), colors)         # #00ff00 accent
+        self.assertIn((1.0, 0.0, 1.0, 1.0), colors)         # #ff00ff detail
+
     def test_two_lottie_scenes_share_the_contract_but_not_the_artwork(self):
         clean = cm.clean_brief(brief())
         action = cm.build_lottie(clean, "action")

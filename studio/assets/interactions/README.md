@@ -18,7 +18,7 @@ The builder writes the runtime JSON/WebM files here and scenes under the player 
 
 ## Custom motions
 
-A creator can also ask the AI for their own motion. `studio/custom_motions.py` turns a short brief into a Lottie scene, and `tools/render_custom_interaction.mjs` draws its frames with the same Skottie engine before encoding the approved WebM. Node and the checkout are only needed while making a motion; clips still play the WebM with ffmpeg alone. Set the checkout folder in Settings → Custom motions (or `PEAKCUT_LOTTIE_CHECKOUT`).
+A creator can also ask the AI for their own motion. `studio/custom_motions.py` turns a short brief into a Lottie scene, and `tools/render_custom_interaction.mjs` draws its frames with the same Skottie engine before encoding the approved WebM. Node and the checkout are only needed while making a motion; clips still play the WebM with ffmpeg alone. Set the checkout folder in Settings → Custom motions (or `PEAKCUT_LOTTIE_CHECKOUT`). When Codex returns SVG drawings, Resvg turns them into PNGs; install it once in the checkout with `npm install @resvg/resvg-js`.
 
 The user supplied the three original MP3 files in `docs/efeitos-sonoros`. The builder copies them unchanged to `sounds/` so Docker and other installations do not depend on a personal folder:
 
