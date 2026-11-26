@@ -1574,17 +1574,18 @@ function drawAdd(variant) {
         ${optBody("templates", `<div id="clip_template_list"></div>`)}
       </section>
       ${langSeg(c?.lang || (S.status.caption_language === "pt-BR" ? "pt" : "en"))}
+      <div class="ob wide"><div class="ob-head"><div class="ot">${i18n.html("Text for every clip")}</div>${optFoldBtn("text")}</div>
+        ${optBody("text", `<div class="ob-stack"><label class="f">${i18n.html("Big text on every clip")} <small>${i18n.html("Optional")}</small>
+          <input id="o_hook" maxlength="60" value="${esc(c?.hook_text || "")}" placeholder="${i18n.html("Left empty, the AI writes a different one for each clip")}"></label>
+          <label class="f">${i18n.html("Description for every clip")} <small>${i18n.html("Optional")}</small>
+          <textarea id="o_desc" rows="3" maxlength="2000" placeholder="${i18n.html("Written once, used exactly as typed on every clip.")}">${esc(c?.description_text || "")}</textarea></label></div>`)}</div>
+      ${interactionOptions(c?.interactions || [], "", true, true)}
       <div class="ob wide"><div class="ob-head"><div class="ot">${i18n.html("Clips")}</div>${optFoldBtn("clips")}</div>
         ${optBody("clips", `<div class="nsteps">
           ${stepper("o_max", i18n.t("How many"), c?.max_clips ?? 6, 1, 20, 1, "")}
           ${stepper("o_min", i18n.t("Shortest"), c?.min_len ?? 15, 5, 120, 5, "s")}
           ${stepper("o_maxlen", i18n.t("Longest"), c?.max_len ?? 60, 10, 180, 5, "s")}
         </div>`)}</div>
-      <div class="ob wide"><div class="ob-head"><div class="ot">${i18n.html("Text for every clip")}</div>${optFoldBtn("text")}</div>
-        ${optBody("text", `<div class="ob-stack"><label class="f">${i18n.html("Big text on every clip")} <small>${i18n.html("Optional")}</small>
-          <input id="o_hook" maxlength="60" value="${esc(c?.hook_text || "")}" placeholder="${i18n.html("Left empty, the AI writes a different one for each clip")}"></label>
-          <label class="f">${i18n.html("Description for every clip")} <small>${i18n.html("Optional")}</small>
-          <textarea id="o_desc" rows="3" maxlength="2000" placeholder="${i18n.html("Written once, used exactly as typed on every clip.")}">${esc(c?.description_text || "")}</textarea></label></div>`)}</div>
       <div class="ob"><div class="ot cap-head"><span id="o_style_label">${i18n.html("Caption style")}</span>
         <label><input type="checkbox" id="o_captions" data-caption-toggle ${c?.captions === false ? "" : "checked"}>${i18n.html("Generate captions")}</label>
         ${optFoldBtn("style")}</div>
@@ -1595,7 +1596,6 @@ function drawAdd(variant) {
         ${optBody("quality", `<input type="hidden" id="o_quality" value="720"><div class="seg" role="group" aria-label="${i18n.html("Video quality")}">
           <button type="button" data-seg="o_quality" data-v="720" aria-pressed="true">720p<small>${i18n.html("Fast")}</small></button>
           <button type="button" data-seg="o_quality" data-v="1080" aria-pressed="false">1080p<small>${i18n.html("Sharper, about 2x slower")}</small></button></div>`)}</div>
-      ${interactionOptions(c?.interactions || [], "", true, true)}
       <div class="ob"><div class="ob-head"><div class="ot">${i18n.html("Part of the video")}</div>${optFoldBtn("range")}</div>
         ${optBody("range", `<div class="range">
           <label>${i18n.html("From")}<input id="o_from" type="number" min="0" placeholder="${i18n.html("start")}" aria-label="${i18n.html("From minute")}">min</label>${ic("arrowr")}
