@@ -594,11 +594,16 @@ def render_one(job, clip, words):
         custom = _custom_motion_paths(job, clip.get("custom_motions"))
         # Older clips were made before the facecam-on-top layout looked for the webcam. Give them the
         # box now, when they are made again, so the face is cut out and enlarged instead of the top
-        # of the game. The job keeps it, so this is looked up only once.
+        # of the game. The webcam may have moved, so look near this clip, not at the middle of the video.
         if _needs_facecam(clip.get("layout")) and not clip.get("facecam"):
-            box = job.get("facecam") or _facecam(job)
+            at = clip["start"] + (clip["end"] - clip["start"]) / 2 - clip.get("src_offset", 0.0)
+            box = facecam.detect_at(job.get("source_path"), max(0.0, at), brain.look_for_facecam)
             if box:
-                clip["facecam"] = box
+                clip["facecam"] = [box["x"], box["y"], box["w"], box["h"]]
+            else:
+                box = job.get("facecam") or _facecam(job)
+                if box:
+                    clip["facecam"] = box
         if clip.get("text_language", "en") != language and config.ai_ready():
             usage.set_context(job.get("creator"), job.get("title") or "")
             clip.update(brain.translate_clip_text(clip, language), text_language=language)
@@ -1085,12 +1090,21 @@ def _run_job(job):
                 c["description"], c["fixed_description"] = o["description_text"], True
             else:                          # no description of their own: 3 to 5 fitting hashtags go at the end of the AI's
                 hashtags.apply(c, words, job["title"], job["uploader"], game)
-            # Both webcam layouts need the box, and it is only looked for once: a stream with no
-            # webcam is not looked for again on every clip of it.
-            if _needs_facecam(o["layout"]) and face is False:
-                face = _facecam(job)
-            if face:
-                c["facecam"] = face
+            if o["layout"] == "facecam_top":
+                # The webcam often moves or is resized during a stream, so one box for the whole
+                # video would miss most clips. Look at a frame near this one instead.
+                box = facecam.detect_at(job.get("source_path"), (c["start"] + c["end"]) / 2,
+                                        brain.look_for_facecam)
+                if box:
+                    c["facecam"] = [box["x"], box["y"], box["w"], box["h"]]
+            if not c.get("facecam") and _needs_facecam(o["layout"]):
+                # The corner layout keeps one box for the whole video, found once: a stream with no
+                # webcam is not looked for again on every clip of it. It also covers clips above
+                # where the model could not see the face.
+                if face is False:
+                    face = _facecam(job)
+                if face:
+                    c["facecam"] = face
             job["clips"].append(c)
             futures.append((renders.submit(ctx.bind(make), c, list(words)), c))
         job["ai"] = {"model": model, "tokens": tokens, "note": "", "log": notes[-5:]}

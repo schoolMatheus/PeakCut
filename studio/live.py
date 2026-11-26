@@ -694,14 +694,23 @@ class Session:
             return
         finally:
             lst.unlink(missing_ok=True)
-        # Both webcam layouts need the box, and only once the clip's own file is written: the
-        # webcam is looked for in it, once per stream.
+        # Both webcam layouts need the box, and only once the clip's own file is written. In the
+        # facecam-on-top layout the webcam may have moved, so look in this clip's own picture. The
+        # corner layout keeps one box for the whole stream.
         if jobs._needs_facecam(clip.get("layout")):
-            if not self.facecam_checked:
-                self.facecam_box = self._find_facecam(src)
-                self.facecam_checked = True
-            if self.facecam_box:
-                clip["facecam"] = self.facecam_box
+            if clip.get("layout") == "facecam_top":
+                try:
+                    box = facecam.detect_at(src, (segs[-1][2] - segs[0][1]) / 2, brain.look_for_facecam)
+                except Exception:  # noqa: BLE001 - a missing facecam is not a failure
+                    box = None
+                if box:
+                    clip["facecam"] = [box["x"], box["y"], box["w"], box["h"]]
+            if not clip.get("facecam"):
+                if not self.facecam_checked:
+                    self.facecam_box = self._find_facecam(src)
+                    self.facecam_checked = True
+                if self.facecam_box:
+                    clip["facecam"] = self.facecam_box
         dur = segs[-1][2] - segs[0][1]
         offset = self._align(src, segs[0][1] + self.clock_fix, dur)
         self.clock_fix = offset - segs[0][1]  # the two clocks drift ~4 s an hour; start the next clip from here

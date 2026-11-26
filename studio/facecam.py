@@ -127,11 +127,13 @@ def _stillness(frames: np.ndarray) -> np.ndarray:
     return frames.astype(np.float32).std(axis=0)
 
 
-def _plausible(x0, y0, x1, y1, still, light, game, share=STILL_SHARE):
+def _plausible(x0, y0, x1, y1, still, light, game, share=STILL_SHARE, trusted=False):
     """Could this rectangle be a webcam picture? Judged on its shape, its stillness and its light.
 
     Returns how much it moves, or None. Nothing here says which corner it is in: a webcam may sit in a
-    corner, along one edge, or with a margin all round."""
+    corner, along one edge, or with a margin all round. `trusted` is a box a model pointed at: it has
+    already said a person is there, so the picture inside is allowed to change over the video (a
+    streamer often resizes the webcam, or switches it off for a moment)."""
     bw, bh = (x1 - x0) / W, (y1 - y0) / H
     if not (MIN_SIZE <= bw <= MAX_SIZE and MIN_SIZE <= bh <= MAX_SIZE):
         return None
@@ -145,10 +147,11 @@ def _plausible(x0, y0, x1, y1, still, light, game, share=STILL_SHARE):
         return None
     cut = max(STILL_MIN, STILL_FRAC * game)
     moving = float(np.median(inside))
-    if moving > cut:
-        return None                    # it changes with the game: it is the game
-    if float((inside > cut).mean()) > share:
-        return None                    # a good part of it moves: the game is showing through
+    if not trusted:
+        if moving > cut:
+            return None                # it changes with the game: it is the game
+        if float((inside > cut).mean()) > share:
+            return None                # a good part of it moves: the game is showing through
     if float(light[b:d, a:c].mean()) < 0.30 * float(light.mean()):
         return None                    # a black hole, not a picture
     return moving
@@ -195,14 +198,15 @@ def _overlap(a, box) -> float:
     return inter / union if union > 0 else 0.0
 
 
-def _full_frame(path: str | Path) -> np.ndarray | None:
-    """One grey frame at full size, from the middle of the video: where the borders are measured."""
+def _full_frame(path: str | Path, at: float | None = None) -> np.ndarray | None:
+    """One grey frame at full size, from the middle of the video or from `at`: where borders are measured."""
     w, h = _size(path)
     if not w or not h:
         return None
+    when = _duration(path) / 2.0 if at is None else at
     try:
         raw = subprocess.run(
-            ["ffmpeg", "-v", "error", "-ss", f"{max(0.0, _duration(path) / 2.0):.1f}", "-i", str(path),
+            ["ffmpeg", "-v", "error", "-ss", f"{max(0.0, when):.1f}", "-i", str(path),
              "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "gray", "-"],
             capture_output=True, timeout=120).stdout or b""
     except Exception:  # noqa: BLE001
@@ -219,12 +223,12 @@ def _best(profile: np.ndarray, approx: float, span: float) -> float:
     return float(lo + seg.argmax()) if len(seg) else float(approx)
 
 
-def _snap(path: str | Path, box, w: int, h: int, span: float = 0.0):
+def _snap(path: str | Path, box, w: int, h: int, span: float = 0.0, at: float | None = None):
     """A box on the small grid, put onto the borders that are really in the picture.
 
     A border the small grid found is a pixel or two out; a box a model proposed can be a good part of the
     frame out, which is what `span` is for. A side within a hair of the frame's own edge is the edge."""
-    frame = _full_frame(path)
+    frame = _full_frame(path, at)
     if frame is None:
         return None
     fh, fw = frame.shape
@@ -264,7 +268,7 @@ def _corner(x0, y0, x1, y1, w, h) -> str:
     return "middle"
 
 
-def _finish(path: str | Path, found: dict, w: int, h: int, still: np.ndarray) -> dict | None:
+def _finish(path: str | Path, found: dict, w: int, h: int, still: np.ndarray, trusted=False) -> dict | None:
     """The box in source pixels, with how sure it is that this is really a camera."""
     snapped = _snap(path, (found["x"], found["y"], found["x1"], found["y1"]), w, h)
     if not snapped:
@@ -276,16 +280,17 @@ def _finish(path: str | Path, found: dict, w: int, h: int, still: np.ndarray) ->
     game = float(np.median(still))
     moving = float(np.median(inside)) if inside.size else 99.0
     # sure of it when the picture inside hardly moves while the game around it is racing
-    conf = "high" if moving <= max(3.0, 0.25 * game) else "low"
+    conf = "high" if trusted or moving <= max(3.0, 0.25 * game) else "low"
     return {"x": int(round(x0)), "y": int(round(y0)), "w": int(round(x1 - x0)), "h": int(round(y1 - y0)),
             "corner": _corner(x0, y0, x1, y1, w, h), "score": found.get("score", 0.0), "conf": conf}
 
 
-def _frame_jpeg(path: str | Path, width: int = 768) -> bytes:
+def _frame_jpeg(path: str | Path, width: int = 768, at: float | None = None) -> bytes:
     """One frame of the stream, small, as a JPEG: what a model is shown."""
+    when = _duration(path) / 2.0 if at is None else at
     try:
         return subprocess.run(
-            ["ffmpeg", "-v", "error", "-ss", f"{max(0.0, _duration(path) / 2.0):.1f}", "-i", str(path),
+            ["ffmpeg", "-v", "error", "-ss", f"{max(0.0, when):.1f}", "-i", str(path),
              "-frames:v", "1", "-vf", f"scale={width}:-2", "-pix_fmt", "yuvj420p", "-q:v", "4",
              "-f", "image2pipe", "-vcodec", "mjpeg", "-"],
             capture_output=True, timeout=120).stdout or b""
@@ -293,9 +298,9 @@ def _frame_jpeg(path: str | Path, width: int = 768) -> bytes:
         return b""
 
 
-def _asked(path: str | Path, ask):
+def _asked(path: str | Path, ask, at: float | None = None):
     """One frame to the model: (did it look, its box as parts of the frame or None)."""
-    jpeg = _frame_jpeg(path)
+    jpeg = _frame_jpeg(path, at=at)
     if not jpeg:
         return False, None
     try:
@@ -309,7 +314,8 @@ def _seen(path: str | Path, box, w: int, h: int, still: np.ndarray, light: np.nd
     """A box the model proposed, put onto the picture's real borders and checked like any other.
 
     A model reads a picture well but places a box roughly, and it can be wrong about the whole thing. So
-    its box is only believed where the borders are really there and the picture inside really is still."""
+    its box is only believed where it has the size and shape of a webcam and is not a black hole. It is
+    allowed to change over the video: the webcam may be resized, or switched off for a moment."""
     fx, fy, fw, fh = box
     snapped = _snap(path, (fx * W, fy * H, (fx + fw) * W, (fy + fh) * H), w, h, span=0.12)
     if not snapped:
@@ -318,12 +324,12 @@ def _seen(path: str | Path, box, w: int, h: int, still: np.ndarray, light: np.nd
     if x1 - x0 < w * MIN_SIZE or y1 - y0 < h * MIN_SIZE:
         return None
     small = (x0 * W / w, y0 * H / h, x1 * W / w, y1 * H / h)
-    # The model has already said a person is here, so the picture inside is allowed to move more than a
-    # measured box would be; what it may not be is the game itself.
-    if _plausible(*small, still, light, float(np.median(still)), share=1.0) is None:
+    # The model has already said a person is here. The picture inside may change a lot over the frames
+    # (this stream resizes its webcam), so only its shape, place and light are checked here.
+    if _plausible(*small, still, light, float(np.median(still)), trusted=True) is None:
         return None
     found = {"x": small[0], "y": small[1], "x1": small[2], "y1": small[3], "score": 0.0}
-    return _finish(path, found, w, h, still)
+    return _finish(path, found, w, h, still, trusted=True)
 
 
 def detect(path: str | Path, ask=None) -> dict | None:
@@ -365,3 +371,37 @@ def detect(path: str | Path, ask=None) -> dict | None:
     if not found:
         return None
     return _finish(path, found[0], w, h, still)
+
+
+def detect_at(path: str | Path, at: float, ask) -> dict | None:
+    """The webcam near one moment of a video, in source pixels, or None.
+
+    A streamer often moves or resizes the webcam during a stream, so one box for the whole video does
+    not fit every clip. This shows the model a frame near this moment and uses its answer directly: a
+    box it points at is close enough to cut out, and snapping it to nearby game edges can move it a
+    long way off. It is still checked for a sensible size, shape and light before it is used."""
+    if ask is None or not path or not Path(path).is_file():
+        return None
+    w, h = _size(path)
+    if not w or not h:
+        return None
+    looked, hinted = _asked(path, ask, at=at)
+    if not looked or not hinted:
+        return None
+    fx, fy, fw, fh = (max(0.0, min(1.0, float(v))) for v in hinted)
+    fw, fh = min(fw, 1.0 - fx), min(fh, 1.0 - fy)
+    bw, bh = fw * w, fh * h
+    if not (MIN_SIZE * w <= bw <= 0.8 * w and MIN_SIZE * h <= bh <= 0.8 * h):
+        return None
+    if not (ASPECT_MIN <= bw / max(1.0, bh) <= ASPECT_MAX):
+        return None
+    frame = _full_frame(path, at)
+    if frame is None:
+        return None
+    x0, y0, x1, y1 = int(fx * w), int(fy * h), int((fx + fw) * w), int((fy + fh) * h)
+    if x1 <= x0 or y1 <= y0:
+        return None
+    if float(frame[y0:y1, x0:x1].mean()) < 0.30 * float(frame.mean()):
+        return None                            # a black hole, not a picture
+    return {"x": x0, "y": y0, "w": x1 - x0, "h": y1 - y0,
+            "corner": _corner(x0, y0, x1, y1, w, h), "score": 0.0, "conf": "high"}

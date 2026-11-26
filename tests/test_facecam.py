@@ -107,6 +107,26 @@ try:
     with patch.object(_ai, "see", return_value=("I am a text model.", 0, 0)):
         check("an answer that is neither is not believed", brain.look_for_facecam(b"jpeg")["looked"], False)
 
+    # ---- a webcam that moves or changes size during the stream: no border stays still, so only the
+    # model can say where it is. Its answer must not be thrown away for being "moving".
+    moved = os.path.join(work, "cam_moving.mp4")
+    subprocess.run(["ffmpeg", "-y", "-v", "error",
+                    "-f", "lavfi", "-i", NOISE,
+                    "-f", "lavfi", "-i", "color=c=0xC08050:size=300x170:rate=25",
+                    "-filter_complex", "[0:v][1:v]overlay=x='if(lt(t,2),0,900)':y=0[v]", "-map", "[v]",
+                    "-frames:v", FRAMES, "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", moved], check=True)
+    check("a moving webcam has no still border to measure", facecam.detect(moved), None)
+    box = facecam.detect(moved, ask=say(True, (0.70, 0.0, 0.234, 0.236)))
+    check("the model's box is used even though the picture moves", (box or {}).get("conf"), "high")
+    check("the box lands on the webcam", abs((box or {}).get("x", 0) - 900) <= 3, True)
+    # a box for one clip: the model is asked about a frame near that moment, not the whole video
+    box = facecam.detect_at(moved, 3.0, say(True, (0.70, 0.0, 0.234, 0.236)))
+    check("a clip gets the box near its own moment", abs((box or {}).get("x", 0) - 896) <= 3, True)
+    check("a clip with no camera gets no box", facecam.detect_at(moved, 3.0, say(True, None)), None)
+    check("a clip with a model that cannot look gets no box", facecam.detect_at(moved, 3.0, say(False)), None)
+    check("a clip with a box on nothing gets no box",
+          facecam.detect_at(moved, 3.0, say(True, (0.02, 0.02, 0.06, 0.06))), None)
+
     # ---- the layout: the game fills the screen and the webcam sits in the corner
     f = render._filter("gameplay", 1920, [0, 0, 300, 170])
     check("the game fills the screen", "scale=1080:1920" in f and "crop=1080:1920" in f, True)
