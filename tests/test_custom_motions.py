@@ -25,6 +25,22 @@ def fake_frame(path):
     Image.new("RGBA", (80, 24), (255, 0, 0, 128)).save(path, "PNG")
 
 
+def cutout_bytes():
+    image = Image.new("RGBA", (60, 40), (0, 0, 0, 0))
+    ImageDraw.Draw(image).ellipse((8, 6, 50, 36), fill=(220, 30, 30, 255))
+    out = io.BytesIO()
+    image.save(out, "PNG")
+    return out.getvalue()
+
+
+def pose_bytes(size=(120, 80)):
+    image = Image.new("RGBA", size, (0, 0, 0, 0))
+    ImageDraw.Draw(image).ellipse((8, 6, size[0] - 8, size[1] - 6), fill=(220, 30, 30, 255))
+    out = io.BytesIO()
+    image.save(out, "PNG")
+    return out.getvalue()
+
+
 class MotionRules(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -39,6 +55,9 @@ class MotionRules(unittest.TestCase):
         self.assertEqual(got["image_action"], "pop")
         self.assertLessEqual(len(got["label"]), 22)
         self.assertEqual(cm.clean_brief(brief(has_image=False, image_action="cry"))["image_action"], "pop")
+        electric = cm.clean_brief(brief(extras="lightning"))
+        self.assertEqual(electric["electric"], "lightning")   # older briefs still ask for a lightning effect
+        self.assertEqual(electric["extras"], "none")
         with self.assertRaises(ValueError):
             cm.clean_brief(brief(action="dance"))
 
@@ -60,7 +79,108 @@ class MotionRules(unittest.TestCase):
         self.assertEqual(len(doc["assets"]), 6)
         self.assertEqual([a["p"] for a in doc["assets"]], names)
         self.assertEqual(sum(1 for l in doc["layers"] if l["ty"] == 2), 6)
-        self.assertEqual([l["ip"] for l in sorted(doc["layers"], key=lambda l: l["ip"])], [0, 20, 40, 60, 80, 100])
+        self.assertEqual([l["ip"] for l in sorted(doc["layers"], key=lambda l: l["ip"])], [0, 16, 36, 56, 76, 96])
+        self.assertEqual(max(l["op"] for l in doc["layers"] if l["ty"] == 2), 120)
+
+    def _ready_checkout(self):
+        checkout = Path(TEMP.name) / "fake-checkout"
+        (checkout / "node_modules" / "canvaskit-wasm").mkdir(parents=True, exist_ok=True)
+        (checkout / "package.json").write_text("{}")
+        status = {"ready": True, "checkout": str(checkout), "node": "node", "message": ""}
+        return checkout, status
+
+    def test_six_incoming_pngs_are_saved_and_become_six_visible_poses(self):
+        checkout, status = self._ready_checkout()
+        calls = []
+        def fake_run(checkout_, scene, out, images=None, webm=False):
+            calls.append(list(images or []))
+            out.mkdir(parents=True, exist_ok=True)
+            names = []
+            for i in range(6):
+                name = f"frame-{i * 20:04d}.png"
+                fake_frame(out / name)
+                names.append(name)
+            return {"frames": names}
+        with patch.object(cm, "checkout_status", return_value=status), patch.object(cm, "_run", side_effect=fake_run):
+            got = cm.draft("test", brief(), cutout_bytes(), str(checkout), [pose_bytes() for _ in range(6)])
+        folder = cm._draft_dir("test", got["id"])
+        saved = sorted(p.name for p in folder.glob("pose-*.png"))
+        self.assertEqual(saved, [f"pose-{i}.png" for i in range(6)])
+        for name in saved:
+            with Image.open(folder / name) as picture:
+                self.assertEqual(picture.size, (220, 220))   # assets declare 220x220, so poses must match
+                self.assertEqual(picture.mode, "RGBA")
+        scene = json.loads((folder / "character.json").read_text(encoding="utf-8"))
+        self.assertEqual(len(scene["assets"]), 6)
+        self.assertEqual([a["p"] for a in scene["assets"]], saved)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(len(calls[1]), 6)               # the renderer received the six saved pictures
+        cm.discard("test", got["id"])
+
+    def test_an_incomplete_sequence_is_a_failure_not_a_generic_character(self):
+        checkout, status = self._ready_checkout()
+        for generated in (None, [pose_bytes()], [pose_bytes()] * 5, [b"not a picture"] * 6):
+            with self.subTest(count=len(generated or [])), \
+                 patch.object(cm, "checkout_status", return_value=status), \
+                 patch.object(cm, "_run", return_value={"frames": []}):
+                with self.assertRaisesRegex(ValueError, "six usable pictures"):
+                    cm.draft("test", brief(), cutout_bytes(), str(checkout), generated)
+        with self.assertRaisesRegex(ValueError, "needs six new poses"):
+            cm.build_lottie(cm.clean_brief(brief()), "character")
+        with self.assertRaisesRegex(ValueError, "needs six new poses"):
+            cm.build_lottie(cm.clean_brief(brief()), "character", ["pose-0.png"])
+        generic = cm.build_lottie(cm.clean_brief(brief()), "character", generic=True)
+        self.assertTrue(all(l["nm"].startswith("Generic drawing") for l in generic["layers"] if l["ty"] == 4))
+        self.assertTrue(all(s["ty"] == "gr" for s in generic["layers"][0]["shapes"]))  # parts do not bleed
+
+    def test_action_draws_the_requested_cursor_click_lightning_and_confirmation(self):
+        chosen = brief(extras="none", electric="lightning", cursor="pointer", click_timing="early", language="pt-BR")
+        doc = cm.build_lottie(cm.clean_brief(chosen), "action")
+        names = [l["nm"] for l in doc["layers"]]
+        for expected in ("Electric reply", "Click response", "Pointer press and release",
+                         "Confirmation tick", "Call to action", "Confirmed action"):
+            self.assertIn(expected, names)
+        pointer = next(l for l in doc["layers"] if l["nm"] == "Pointer press and release")
+        response = next(l for l in doc["layers"] if l["nm"] == "Click response")
+        self.assertEqual(response["ip"], 34)                          # quick means an early click
+        self.assertIn(26, [k["t"] for k in pointer["ks"]["p"]["k"]])  # the pointer arrives before it
+        self.assertIn(82, [k["s"][0] for k in pointer["ks"]["s"]["k"]])  # the pointer presses down
+        confirmed = next(l for l in doc["layers"] if l["nm"] == "Confirmed action")
+        self.assertEqual(confirmed["t"]["d"]["k"][0]["s"]["t"], "INSCRITO")
+        slow = cm.build_lottie(cm.clean_brief(brief(click_timing="late")), "action")
+        slow_response = next(l for l in slow["layers"] if l["nm"] == "Click response")
+        self.assertEqual(slow_response["ip"], 72)
+
+        plain = cm.build_lottie(cm.clean_brief(brief(electric="none", cursor="none")), "action")
+        plain_names = [l["nm"] for l in plain["layers"]]
+        self.assertNotIn("Electric reply", plain_names)
+        self.assertNotIn("Pointer press and release", plain_names)
+
+    def test_the_ai_detail_color_survives_when_no_palette_is_chosen(self):
+        answer = {"style": "Bold", "background": "#111111", "ink": "#ffffff", "accent": "#ff0000",
+                  "detail": "#123456", "image_action": "wave", "label": "INSCREVA-SE", "note": "Teste"}
+        with patch("studio.ai.ready", return_value=True), \
+                patch("studio.brain.ask_ai", return_value=(answer, "model", 20)):
+            got = cm.ask_brief(brief())
+        self.assertEqual(got["detail"], "#123456")
+
+    def test_drawing_uses_the_image_provider_and_asks_for_wave_poses(self):
+        answer = {"style": "Bold", "background": "#111111", "ink": "#ffffff", "accent": "#ff0000",
+                  "image_action": "wave", "label": "INSCREVA-SE", "note": "Teste"}
+        made = [pose_bytes() for _ in range(6)]
+        pictures = []
+        with patch("studio.ai.ready", return_value=True), \
+                patch("studio.ai.provider", return_value="codex"), \
+                patch("studio.ai.draw", return_value=(answer, 10, 2, made)) as draw:
+            got = cm.ask_brief(brief(image_prompt="tchau"), pictures)
+        self.assertEqual(pictures, made)
+        self.assertIn("hand high", draw.call_args.args[0].lower())
+        self.assertEqual(got["image_action"], "wave")
+        with patch("studio.ai.ready", return_value=True), \
+                patch("studio.ai.provider", return_value="codex"), \
+                patch("studio.ai.draw", return_value=(answer, 10, 2, made[:4])):
+            with self.assertRaisesRegex(ValueError, "did not return the six poses"):
+                cm.ask_brief(brief(image_prompt="tchau"), [])
 
     def test_action_uses_the_chosen_palette_and_the_requested_decoration(self):
         chosen = brief(background="#123456", ink="#ffffff", accent="#00ff00", detail="#ff00ff", extras="stars")
@@ -79,7 +199,7 @@ class MotionRules(unittest.TestCase):
     def test_two_lottie_scenes_share_the_contract_but_not_the_artwork(self):
         clean = cm.clean_brief(brief())
         action = cm.build_lottie(clean, "action")
-        character = cm.build_lottie(clean, "character")
+        character = cm.build_lottie(clean, "character", [f"pose-{i}.png" for i in range(6)])
         for doc in (action, character):
             self.assertEqual((doc["w"], doc["h"], doc["fr"], doc["op"]), (800, 240, 30, 120))
             self.assertEqual(len(doc["fonts"]["list"]), 1)
@@ -92,9 +212,9 @@ class MotionRules(unittest.TestCase):
             self.assertFalse(any(expression(layer) for layer in doc["layers"]))
         self.assertEqual(action["assets"], [])
         self.assertIn(5, [l["ty"] for l in action["layers"]])       # the action's text
-        self.assertEqual(character["assets"], [])
-        self.assertNotIn(2, [l["ty"] for l in character["layers"]]) # the cut-out is not pasted in
-        self.assertEqual(sum(1 for l in character["layers"] if l["nm"].startswith("New drawing")), 6)
+        self.assertEqual(len(character["assets"]), 6)               # six generated poses, not the source picture
+        self.assertNotIn("source-image.png", [a["p"] for a in character["assets"]])
+        self.assertEqual(sum(1 for l in character["layers"] if l["nm"].startswith("New picture")), 6)
         self.assertNotIn(5, [l["ty"] for l in character["layers"]]) # no card, no label on the character
 
     def test_ai_brief_is_asked_once_and_merged_with_the_form(self):
@@ -165,6 +285,18 @@ class MotionRules(unittest.TestCase):
         self.assertEqual(changed[0]["start"], plain[0]["start"])
         self.assertEqual(changed[0]["end"], plain[0]["end"])
         self.assertEqual(changed[0]["sounds"], plain[0]["sounds"])
+
+    def test_custom_motion_click_sound_follows_the_drawn_click(self):
+        asset = Path(TEMP.name) / "motion-click1234.webm"
+        scene = cm.build_lottie(cm.clean_brief(brief(click_timing="early")), "action")
+        asset.with_suffix(".json").write_text(json.dumps({"action": scene}), encoding="utf-8")
+        planned = interactions.plan(["subscribe"], 8, 300, 1380, "pt-BR",
+                                    custom_motions={"subscribe": asset})[0]
+        plain = interactions.plan(["subscribe"], 8, 300, 1380, "pt-BR")[0]
+        click = next(s for s in planned["sounds"] if s["name"] == "click")
+        original = next(s for s in plain["sounds"] if s["name"] == "click")
+        self.assertLess(click["start"], original["start"])
+        asset.with_suffix(".json").unlink()
 
 
 class MotionStorage(unittest.TestCase):

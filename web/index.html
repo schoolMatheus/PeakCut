@@ -1733,7 +1733,7 @@ async function openCustomMotion(given) {
   const lottie = S.status.lottie || {ready:false, message:""};
   dlg.innerHTML = `<form class="dlg cm-dlg" id="cmform">
     <h2>${i18n.html("Custom motion")}</h2>
-    <p class="help">${i18n.html("Describe the action motion and the character motion separately. The AI draws both as Lottie animations and shows a filmstrip for each. Nothing is used in a clip until you approve both.")}</p>
+    <p class="help">${i18n.html("Describe the action motion and the character motion separately. The AI draws six new poses of your cut-out and an action card, then shows a filmstrip for each. Nothing is used in a clip until you approve both.")}</p>
     <section><h3>${i18n.html("Saved motions")}</h3><div id="cm_saved">${savedMotions(c)}</div></section>
     ${lottie.ready ? "" : `<p class="help" role="alert">${esc(lottie.message || i18n.t("Custom motions are not available on this server."))}</p>`}
     <label class="f">${i18n.html("Audience request")}<select id="cm_action">${Object.keys(INTERACTION_LABELS).map(a =>
@@ -1744,7 +1744,7 @@ async function openCustomMotion(given) {
       <option value="youtube">${i18n.html("YouTube (default)")}</option>
       ${(c.interaction_styles || []).map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join("")}
     </select><span class="hint">${i18n.html("Leave it to the AI, or use the built-in YouTube colors or one of this creator's styles.")}</span></label>
-    <label class="f">${i18n.html("How should the action animation look?")}<textarea id="cm_desc" rows="3" maxlength="600" placeholder="${i18n.html("For example: quick and cheerful, bold purple letters, a little bouncing star")}"></textarea></label>
+    <label class="f">${i18n.html("How should the action animation look?")}<textarea id="cm_desc" rows="3" maxlength="600" placeholder="${i18n.html("For example: quick and electric, a cursor clicking the button with lightning, bold purple letters")}"></textarea></label>
     <label class="f">${i18n.html("Cut-out picture (transparent PNG)")}<input type="file" id="cm_image" accept="image/png"><span class="hint">${i18n.html("Send a PNG with the background removed. PeakCut uses it as a colour and identity reference and draws six new poses of the character.")}</span></label>
     <label class="f">${i18n.html("What should the character do?")}<textarea id="cm_image_prompt" rows="2" maxlength="300" placeholder="${i18n.html("Wave goodbye, laugh, cry, jump…")}"></textarea></label>
     <div id="cm_review" hidden>

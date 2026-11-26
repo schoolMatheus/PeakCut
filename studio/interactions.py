@@ -1,4 +1,5 @@
 """Timed audience motions and their sound effects, ready for the video renderer."""
+import json
 import shutil
 from pathlib import Path
 
@@ -48,13 +49,23 @@ def plan(actions, duration, hook_y, cap_y, language="en", *, caption_style="clea
             sounds.append({"name": "typing", "start": start + 28 / 30 * rate,
                            "end": start + 76 / 30 * rate, "source_start": .2, "source_duration": 1.6,
                            "rate": rate, "gain": .6})
-        click = (88 if action == "comment" else 48) / 30 * rate
+        chosen = Path(custom_motions[action]) if custom_motions and custom_motions.get(action) else None
+        click_frame = 88 if action == "comment" else 48
+        if chosen:
+            # A custom motion stores its scene beside the WebM. Read the click from the scene so the sound
+            # lands on the pointer press even when the person asked for a quicker or slower motion.
+            try:
+                scene = json.loads(chosen.with_suffix(".json").read_text(encoding="utf-8"))
+                response = next(l for l in scene["action"]["layers"] if l.get("nm") == "Click response")
+                click_frame = int(response["ip"])
+            except (OSError, ValueError, KeyError, TypeError, StopIteration):
+                pass
+        click = click_frame / 30 * rate
         sounds.append({"name": "click", "start": start + click, "end": min(end, start + click + .498 * rate),
                        "source_start": .15, "source_duration": .498, "rate": rate, "gain": .6})
         motions.append({"action": action, "start": start, "end": end, "rate": rate,
                         "x": (1080 - WIDTH) / 2, "y": top, "caption_y": cap_y,
-                        "asset": (Path(custom_motions[action]) if custom_motions and custom_motions.get(action)
-                                  else ASSETS / language / f"{action}.webm"), "sounds": sounds})
+                        "asset": chosen or ASSETS / language / f"{action}.webm", "sounds": sounds})
     return motions
 
 

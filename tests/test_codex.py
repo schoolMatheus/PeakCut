@@ -103,6 +103,39 @@ class AdapterTests(unittest.TestCase):
             self.assertIn(f"features.{feature}=false", args)
         self.assertFalse(Path(kw["cwd"]).exists())
 
+    def test_drawing_has_its_own_instructions_and_keeps_the_analysis_path_restricted(self):
+        seen = {}
+        def inspect(args, kw):
+            option = next(a for a in args if a.startswith("model_instructions_file="))
+            seen["text"] = Path(json.loads(option.split("=", 1)[1])).read_text(encoding="utf-8")
+            seen["args"] = args
+        self.inspect = inspect
+        codex.run("default", "hello")
+        self.assertIn("Do not use tools", seen["text"])
+        self.assertIn("features.image_generation=false", seen["args"])
+        codex.run("default", "hello", drawing=True)
+        self.assertNotIn("Do not use tools", seen["text"])
+        self.assertIn("picture tool", seen["text"].lower())
+        self.assertNotIn("features.image_generation=false", seen["args"])
+
+    def test_draw_never_fills_a_short_sequence_with_other_peoples_pictures(self):
+        import base64
+        png = b"\x89PNG\r\n\x1a\n" + b"fake image bytes"
+        lines = [
+            {"type": "item.completed", "item": {"type": "agent_message", "text": '{"style":"bold"}'}},
+            *[{"type": "item.completed", "item": {"type": "image_generation_call", "status": "completed",
+                                                 "result": base64.b64encode(png).decode()}} for _ in range(4)],
+            {"type": "turn.completed", "usage": {"input_tokens": 10, "output_tokens": 2}},
+        ]
+        self.output = "\n".join(json.dumps(x) for x in lines)
+        with self.assertRaisesRegex(codex.CodexError, "4 of the 6"):
+            codex.draw("default", "draw these six poses")
+        with patch.object(codex, "run", return_value=('{"style":"bold"}', 10, 2, [png] * 6)) as run:
+            text, _sent, _wrote, images = codex.draw("default", "draw these six poses")
+        self.assertEqual(json.loads(text), {"style": "bold"})
+        self.assertEqual(len(images), 6)
+        self.assertTrue(run.call_args.kwargs["drawing"])
+
     def test_chosen_reasoning_effort_is_sent_to_the_cli(self):
         codex.run("chosen-model", "hello", reasoning_effort="xhigh")
         self.assertIn('model_reasoning_effort="xhigh"', self.calls[-1][0])
