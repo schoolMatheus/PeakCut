@@ -67,6 +67,11 @@ try:
     check("the job keeps it on the job", "facecam" in job, True)
     check("the box is the right size", abs(box[2] - 300) <= 1 and abs(box[3] - 170) <= 1, True)
     check("a job with no video finds no webcam", jobs._facecam({"source_path": os.path.join(work, "nope.mp4")}), None)
+    # a clip only gets the box when its layout asks for it: both webcam layouts must be looked for
+    check("the gameplay layout looks for the webcam", jobs._needs_facecam("gameplay"), True)
+    check("the facecam-on-top layout looks for the webcam", jobs._needs_facecam("facecam_top"), True)
+    check("other layouts do not look for a webcam", jobs._needs_facecam("crop"), False)
+    check("a missing layout does not look for a webcam", jobs._needs_facecam(None), False)
 
     # ---- a webcam that is square and runs along one edge, not into a corner
     sq = make("cam_sq.mp4", "color=c=0xC08050:size=360x355:rate=25", where="920:165")

@@ -592,6 +592,13 @@ def render_one(job, clip, words):
         style = clip.get("interaction_style") or {}
         seal_avatar = interaction_styles.avatar_for(job.get("creator")) if style.get("seal") else None
         custom = _custom_motion_paths(job, clip.get("custom_motions"))
+        # Older clips were made before the facecam-on-top layout looked for the webcam. Give them the
+        # box now, when they are made again, so the face is cut out and enlarged instead of the top
+        # of the game. The job keeps it, so this is looked up only once.
+        if _needs_facecam(clip.get("layout")) and not clip.get("facecam"):
+            box = job.get("facecam") or _facecam(job)
+            if box:
+                clip["facecam"] = box
         if clip.get("text_language", "en") != language and config.ai_ready():
             usage.set_context(job.get("creator"), job.get("title") or "")
             clip.update(brain.translate_clip_text(clip, language), text_language=language)
@@ -797,6 +804,11 @@ def _covers(words: list, start: float, end: float) -> bool:
     inside = [w for w in words if start <= w["s"] <= end]
     minutes = max(0.5, (end - start) / 60)
     return len(inside) >= 25 * minutes and inside[-1]["s"] >= start + 0.85 * (end - start)
+
+
+def _needs_facecam(layout) -> bool:
+    """Does this layout put the webcam in the clip? Both webcam layouts need the same box."""
+    return layout in ("gameplay", "facecam_top")
 
 
 def _facecam(job) -> list | None:
@@ -1073,9 +1085,9 @@ def _run_job(job):
                 c["description"], c["fixed_description"] = o["description_text"], True
             else:                          # no description of their own: 3 to 5 fitting hashtags go at the end of the AI's
                 hashtags.apply(c, words, job["title"], job["uploader"], game)
-            # Only the gameplay layout uses a webcam, so it is only looked for then, and only once: a
-            # stream with no webcam is not looked for again on every clip of it.
-            if o["layout"] == "gameplay" and face is False:
+            # Both webcam layouts need the box, and it is only looked for once: a stream with no
+            # webcam is not looked for again on every clip of it.
+            if _needs_facecam(o["layout"]) and face is False:
                 face = _facecam(job)
             if face:
                 c["facecam"] = face
