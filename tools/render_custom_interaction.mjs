@@ -12,7 +12,7 @@ import { spawnSync } from "node:child_process";
 
 const [checkoutArg, sceneArg, outArg, ffmpegArg, ...rest] = process.argv.slice(2);
 const webm = rest.includes("--webm");
-const imageArg = rest.find(x => x !== "--webm") || "";
+const imageArgs = rest.filter(x => x !== "--webm");
 const checkout = path.resolve(checkoutArg || "");
 const sceneFile = path.resolve(sceneArg || "");
 const out = path.resolve(outArg || "");
@@ -37,10 +37,10 @@ const assets = {};
 // Native Lottie text needs the font beside the scene; use the bundled caption font from PeakCut.
 const fontFile = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "studio", "fonts", "Poppins-ExtraBold.ttf");
 assets["Poppins-ExtraBold.ttf"] = new Uint8Array(fs.readFileSync(fontFile));
-if (imageArg) {
-  const image = path.resolve(imageArg);
+for (const arg of imageArgs) {
+  const image = path.resolve(arg);
   const name = path.basename(image);
-  if (!/^[\w\-]+\.(png|jpe?g|webp)$/i.test(name)) throw new Error("The picture has an unexpected name.");
+  if (!/^[\w\-]+\.(png|jpe?g|webp)$/i.test(name)) throw new Error("A generated picture has an unexpected name.");
   assets[name] = new Uint8Array(fs.readFileSync(image));
 }
 const anim = ck.MakeManagedAnimation(raw, assets);

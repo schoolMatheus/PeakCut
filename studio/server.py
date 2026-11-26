@@ -1506,11 +1506,12 @@ async def draft_custom_motion(cid: str, action: str = Form(""), action_descripti
         if style:
             palette_colors = {k: style[k] for k in ("background", "ink", "accent", "detail")}
     try:
+        pictures = []
         brief = cm.ask_brief({"action": action, "action_description": action_description,
                               "image_prompt": image_prompt, "has_image": True, "language": language,
-                              "palette_colors": palette_colors,
-                              "character_color": cm.dominant_color(picture)})
-        draft_ = cm.draft(cid, brief, picture, accounts.settings().get("lottie_checkout", ""))
+                              "palette_colors": palette_colors, "reference_image": picture,
+                              "character_color": cm.dominant_color(picture)}, pictures)
+        draft_ = cm.draft(cid, brief, picture, accounts.settings().get("lottie_checkout", ""), pictures)
     except ValueError as e:
         raise HTTPException(400, str(e))
     except RuntimeError as e:

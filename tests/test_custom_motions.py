@@ -53,10 +53,19 @@ class MotionRules(unittest.TestCase):
             self.assertEqual(got[key], value)
         self.assertIn(palette["accent"], ask.call_args.args[0])   # the model was told which colors to use
 
+    def test_generated_pictures_become_six_new_frames(self):
+        clean = cm.clean_brief(brief())
+        names = [f"pose-{i}.png" for i in range(6)]
+        doc = cm.build_lottie(clean, "character", names)
+        self.assertEqual(len(doc["assets"]), 6)
+        self.assertEqual([a["p"] for a in doc["assets"]], names)
+        self.assertEqual(sum(1 for l in doc["layers"] if l["ty"] == 2), 6)
+        self.assertEqual([l["ip"] for l in sorted(doc["layers"], key=lambda l: l["ip"])], [0, 20, 40, 60, 80, 100])
+
     def test_two_lottie_scenes_share_the_contract_but_not_the_artwork(self):
         clean = cm.clean_brief(brief())
         action = cm.build_lottie(clean, "action")
-        character = cm.build_lottie(clean, "character", cm.SOURCE_IMAGE)
+        character = cm.build_lottie(clean, "character")
         for doc in (action, character):
             self.assertEqual((doc["w"], doc["h"], doc["fr"], doc["op"]), (800, 240, 30, 120))
             self.assertEqual(len(doc["fonts"]["list"]), 1)

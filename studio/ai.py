@@ -452,6 +452,19 @@ def see(prompt: str, image: bytes, timeout: float | None = None) -> tuple[str, i
     return text, int(u.get("prompt_tokens") or 0), int(u.get("completion_tokens") or 0)
 
 
+def draw(prompt: str, image: bytes | None = None, timeout: float | None = None, count: int = 6):
+    """Ask the connected subscription for new pictures. Only Codex can draw inside PeakCut right now.
+
+    Returns (answer text, tokens in, tokens out, list of PNG bytes)."""
+    if not ready() or not models():
+        raise ValueError("The AI is not set up yet. Add a key or connect Codex in Settings first.")
+    model = models()[0]
+    if provider() == "codex":
+        return codex.draw(model, prompt, image=image, timeout=timeout,
+                          reasoning_effort=current()["reasoning_effort"], count=count)
+    raise ValueError("Drawing new pictures needs a Codex subscription. Pick Codex in Settings, or use the drawn motions instead.")
+
+
 def _gem(model: str) -> str:
     """Gemini names models "models/gemini-2.5-flash"; the address already ends in /models, so only the bare id is used."""
     return model.removeprefix("models/")

@@ -16,7 +16,7 @@ import time
 from collections import Counter
 from pathlib import Path
 
-from . import brain, config, interactions
+from . import brain, config, interactions, usage
 from .media import NO_WINDOW
 
 W, H, FPS, FRAMES = interactions.WIDTH, interactions.HEIGHT, 30, 120
@@ -155,8 +155,8 @@ def _answer(value) -> dict:
     return got
 
 
-def ask_brief(value: dict) -> dict:
-    """One AI call. The returned brief is not saved until the person approves the filmstrip."""
+def ask_brief(value: dict, images_out: list | None = None) -> dict:
+    """One AI call. When Codex is connected it also draws the six new pictures for the character."""
     from . import ai
     if not ai.ready():
         raise ValueError("The AI is not set up yet. Add a key in Settings first.")
@@ -175,7 +175,12 @@ def ask_brief(value: dict) -> dict:
     spoken = "Brazilian Portuguese" if brief["language"] == "pt-BR" else "English"
     prompt = PROMPT.format(action=brief["action"], brief=description, image_line=image_line,
                            language=spoken, palette_line=palette_line)
-    got, _model, _tokens = brain.ask_ai(prompt, MOTION_SCHEMA, purpose="Interaction motion: brief", timeout=120)
+    if images_out is not None and ai.provider() == "codex":
+        got, sent, wrote, made = ai.draw(prompt, image=value.get("reference_image"), timeout=120, count=6)
+        usage.record(sent, wrote, "Interaction motion: brief and drawings")
+        images_out.extend(made)
+    else:
+        got, _model, _tokens = brain.ask_ai(prompt, MOTION_SCHEMA, purpose="Interaction motion: brief", timeout=120)
     parsed = _answer(got)
     merged = {**brief, **{k: parsed.get(k) for k in ("style", "background", "ink", "accent",
                                                      "image_action", "label", "note", "action_style",
@@ -262,7 +267,7 @@ def _motion_for(behavior):
                             (54, [100, 100, 100]), (119, [100, 100, 100])])}
 
 
-def build_lottie(brief: dict, kind: str, image_name: str = "") -> dict:
+def build_lottie(brief: dict, kind: str, image_names=None) -> dict:
     """One of two Skottie-safe scenes: the action card, or the cut-out picture on its own.
 
     Both share the same canvas and timing, so they can be overlaid into one WebM after approval. No expressions,
@@ -281,7 +286,22 @@ def build_lottie(brief: dict, kind: str, image_name: str = "") -> dict:
                        "ks": _transform(ks), "ao": 0, "shapes": shapes, "ip": ip, "op": op, "st": 0, "bm": 0})
         next_index += 1
 
-    if kind == "character":
+    if kind == "character" and image_names:
+        # Real new pictures from the image tool, one per beat, cross-fading through the motion.
+        assets = []
+        for i, name in enumerate(image_names[:6]):
+            ip, op = i * 20, (i + 1) * 20
+            ref = f"pose{i}"
+            assets.append({"id": ref, "w": 220, "h": 220, "u": "", "p": name, "e": 0})
+            layers.append({"ddd": 0, "ind": next_index, "ty": 2, "nm": f"New picture {i + 1}", "sr": 1,
+                           "ks": _transform({"a": _static([110, 110, 0]),
+                                             "p": _static([180, 120, 0]),
+                                             "s": _animated([(ip, [94, 94, 100]), (ip + 4, [100, 100, 100]),
+                                                             (op - 4, [100, 100, 100]), (op, [104, 104, 100])], "calm"),
+                                             "o": _animated([(ip, 0), (ip + 3, 100), (op - 3, 100), (op, 0)], "calm")}),
+                           "ao": 0, "ip": ip, "op": op, "st": 0, "bm": 0, "refId": ref})
+            next_index += 1
+    elif kind == "character":
         # Six new vector drawings of the character, one per beat. The uploaded cut-out only gave us its color.
         color, behavior = brief["character_color"], brief["image_action"]
         for beat in range(6):
@@ -393,10 +413,10 @@ def checkout_status(checkout: str = "") -> dict:
             "message": "A diffusionstudio/lottie checkout with its npm dependencies is needed. Clone it, run npm install, then set its folder in Settings."}
 
 
-def _run(checkout: str, scene: Path, out: Path, image: Path | None, webm: bool):
+def _run(checkout: str, scene: Path, out: Path, images=None, webm: bool = False):
     ffmpeg = shutil.which("ffmpeg") or "ffmpeg"
     cmd = ["node", str(_node_script()), checkout, str(scene), str(out), ffmpeg]
-    if image:
+    for image in (images or []):
         cmd.append(str(image))
     if webm:
         cmd.append("--webm")
@@ -453,8 +473,9 @@ def dominant_color(image: bytes) -> str:
     return f"#{r:02x}{g:02x}{b:02x}"
 
 
-def draft(cid: str, brief: dict, image: bytes, checkout: str) -> dict:
+def draft(cid: str, brief: dict, image: bytes, checkout: str, generated=None) -> dict:
     """Make two Lottie scenes and a filmstrip for each. Nothing is saved for use yet."""
+    from PIL import Image
     status = checkout_status(checkout)
     if not status["ready"]:
         raise ValueError(status["message"])
@@ -464,7 +485,18 @@ def draft(cid: str, brief: dict, image: bytes, checkout: str) -> dict:
     folder.mkdir(parents=True, exist_ok=True)
     # The uploaded cut-out is only a color and identity reference; the Lottie draws new poses itself.
     brief = {**clean_brief(brief), "character_color": dominant_color(cutout)}
-    scenes = {"action": build_lottie(brief, "action"), "character": build_lottie(brief, "character")}
+    image_names = []
+    for i, data in enumerate((generated or [])[:6]):
+        try:
+            picture = Image.open(io.BytesIO(data)).convert("RGBA")
+            picture.thumbnail((220, 220), Image.LANCZOS)
+            name = f"pose-{i}.png"
+            picture.save(folder / name, "PNG")
+            image_names.append(name)
+        except Exception:  # noqa: BLE001 - a bad picture is skipped, the vector fallback still works
+            pass
+    scenes = {"action": build_lottie(brief, "action"),
+              "character": build_lottie(brief, "character", image_names or None)}
     frames_by_kind = {}
     try:
         for kind in KINDS:
@@ -472,7 +504,8 @@ def draft(cid: str, brief: dict, image: bytes, checkout: str) -> dict:
             scene.write_text(json.dumps(scenes[kind]), encoding="utf-8")
             out = folder / kind
             out.mkdir(exist_ok=True)
-            result = _run(status["checkout"], scene, out, None, False)
+            pictures = [folder / name for name in image_names] if kind == "character" else []
+            result = _run(status["checkout"], scene, out, pictures, False)
             frames = [f for f in result.get("frames") or [] if re.fullmatch(r"frame-\d{4}\.png", f)]
             if len(frames) < 6:
                 raise ValueError("The renderer did not make enough frames to show the motion.")
@@ -542,7 +575,8 @@ def approve(cid: str, did: str, checkout: str) -> dict:
         if not scene.is_file():
             raise ValueError("That motion draft has expired. Ask for it again.")
         scenes[kind] = json.loads(scene.read_text(encoding="utf-8"))
-        _run(status["checkout"], scene, folder / kind, None, True)
+        pictures = sorted(folder.glob("pose-*.png")) if kind == "character" else []
+        _run(status["checkout"], scene, folder / kind, pictures, True)
     action_webm, character_webm = folder / "action" / "motion.webm", folder / "character" / "motion.webm"
     if not action_webm.is_file() or not character_webm.is_file():
         raise ValueError("The motion could not be encoded. Ask for it again.")

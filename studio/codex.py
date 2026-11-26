@@ -1,4 +1,5 @@
 """Use the owner's Codex subscription through the official CLI, which owns login and token refresh."""
+import base64
 import json
 import os
 from pathlib import Path
@@ -202,9 +203,9 @@ def _failure(text):
     return "Codex did not finish its answer. Try again, or check Codex in a terminal."
 
 
-def _answer(result):
+def _answer(result, collect_images=False):
     text, done, failed, sent, wrote = "", False, False, 0, 0
-    errors = []
+    errors, images = [], []
     for line in result.stdout.split("\n"):
         if not line.strip():
             continue
@@ -222,6 +223,19 @@ def _answer(result):
             item = event.get("item") or {}
             if isinstance(item, dict) and item.get("type") == "agent_message" and item.get("phase") != "commentary":
                 text = item.get("text") or ""
+            if collect_images and isinstance(item, dict) and "image" in str(item.get("type") or "").lower():
+                raw = item.get("result") or item.get("b64_json") or item.get("image") or item.get("output") or ""
+                if isinstance(raw, str) and raw.strip():
+                    encoded = raw.split(",", 1)[1] if raw.strip().startswith("data:") else raw
+                    try:
+                        image = base64.b64decode(encoded, validate=False)
+                        if image[:4] == b"\x89PNG":
+                            images.append(image)
+                    except Exception:  # noqa: BLE001 - a malformed image is simply ignored
+                        pass
+                saved = item.get("path") or item.get("local_path") or ""
+                if saved and Path(saved).is_file():
+                    images.append(Path(saved).read_bytes())
         if kind == "turn.completed":
             if not text:
                 raise CodexError("Codex finished without an answer. Try again.")
@@ -234,10 +248,12 @@ def _answer(result):
     # Codex input_tokens already includes cache hits; count them once, like PeakCut's other providers.
     if type(sent) is not int or type(wrote) is not int or sent < 0 or wrote < 0:
         raise CodexError("Codex returned an invalid usage record. Update Codex CLI and try again.")
+    if collect_images:
+        return text.strip(), sent, wrote, images
     return text.strip(), sent, wrote
 
 
-def run(model, prompt, schema=None, image=None, timeout=None, reasoning_effort=None) -> tuple[str, int, int]:
+def run(model, prompt, schema=None, image=None, timeout=None, reasoning_effort=None, images=False) -> tuple[str, int, int]:
     """One stateless request. The deadline includes waiting behind another request and checking login."""
     effort = validate_effort(reasoning_effort)
     seconds = float(timeout) if timeout is not None else 180.0
@@ -271,6 +287,8 @@ def run(model, prompt, schema=None, image=None, timeout=None, reasoning_effort=N
                     "-c", "project_doc_max_bytes=0", "-c", "skills.include_instructions=false",
                     "-c", "skills.bundled.enabled=false", "-c", "model_instructions_file=" + json.dumps(str(instructions))]
             for feature in DISABLED_FEATURES:
+                if images and feature == "image_generation":
+                    continue      # the caller asked the subscription to draw pictures
                 args += ["-c", f"features.{feature}=false"]
             args += ["-c", "agents.enabled=false", "-c", "apps._default.enabled=false"]
             if model and model != "default":
@@ -288,7 +306,9 @@ def run(model, prompt, schema=None, image=None, timeout=None, reasoning_effort=N
                 path.write_bytes(image)
                 args += ["--image", str(path)]
             args += ["--json", "-"]
-            text, sent, wrote = _answer(_process(args, remaining(), input=prompt, cwd=directory))
+            answer = _answer(_process(args, remaining(), input=prompt, cwd=directory), images)
+            text, sent, wrote = answer[:3]
+            generated = answer[3] if images else []
             if schema is not None:
                 try:
                     data = json.loads(text)
@@ -296,6 +316,43 @@ def run(model, prompt, schema=None, image=None, timeout=None, reasoning_effort=N
                 except (ValueError, KeyError, TypeError):
                     raise CodexError("Codex did not answer with the requested JSON. Try again.") from None
                 text = json.dumps(data, ensure_ascii=False)
+            if images:
+                return text, sent, wrote, generated
             return text, sent, wrote
     finally:
         _lock.release()
+
+
+def recent_images(minutes=10, limit=6) -> list[bytes]:
+    """Codex also saves generated pictures under CODEX_HOME; use them if the stream carried no bytes."""
+    root = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex") / "generated_images"
+    if not root.is_dir():
+        return []
+    cutoff = time.time() - minutes * 60
+    files = []
+    for path in root.rglob("*.png"):
+        try:
+            if path.stat().st_mtime >= cutoff:
+                files.append(path)
+        except OSError:
+            pass
+    files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    out = []
+    for path in files[:limit]:
+        try:
+            out.append(path.read_bytes())
+        except OSError:
+            pass
+    return out
+
+
+def draw(model, prompt, image=None, timeout=None, reasoning_effort=None, count=6):
+    """Ask the subscription's image tool for a sheet of new pictures, plus the usual JSON answer."""
+    directions = (prompt + f"\n\nAlso generate exactly {count} separate PNG images, one for each beat of the "
+                  "character motion. Use the attached picture as the identity and color reference. "
+                  "Return the JSON object as your final message.")
+    text, sent, wrote, images = run(model, directions, image=image, timeout=timeout,
+                                    reasoning_effort=reasoning_effort, images=True)
+    if len(images) < count:
+        images += recent_images(limit=count - len(images))
+    return text, sent, wrote, images[:count]

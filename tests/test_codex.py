@@ -47,6 +47,20 @@ class AdapterTests(unittest.TestCase):
         self.inspect(args, kw)
         return subprocess.CompletedProcess(args, self.exitcode, self.output, "private diagnostic")
 
+    def test_generated_pictures_are_collected_from_the_event_stream(self):
+        import base64
+        png = b"\x89PNG\r\n\x1a\n" + b"fake image bytes"
+        lines = [
+            {"type": "item.completed", "item": {"type": "agent_message", "text": '{"style":"bold"}'}},
+            {"type": "item.completed", "item": {"type": "image_generation_call", "status": "completed",
+                                                "result": base64.b64encode(png).decode()}},
+            {"type": "turn.completed", "usage": {"input_tokens": 10, "output_tokens": 2}},
+        ]
+        result = subprocess.CompletedProcess([], 0, "\n".join(json.dumps(x) for x in lines), "")
+        text, sent, wrote, images = codex._answer(result, True)
+        self.assertEqual(json.loads(text), {"style": "bold"})
+        self.assertEqual(images, [png])
+
     def test_json_answer_usage_and_stdin(self):
         prompt = "ação " + "x" * 40000 + " $(do-not-run)"
         self.assertEqual(codex.run("default", prompt), ('{"items":["ok"]}', 20, 3))
