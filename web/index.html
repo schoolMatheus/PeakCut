@@ -428,6 +428,9 @@ img.av{object-fit:cover}
 .composer.compact .ob{background:#fff}
 .ob.wide{grid-column:1/-1}
 .ot{font-size:12px;font-weight:600;color:var(--dim);margin-bottom:10px}
+.ob-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px}
+.ob-head .ot{margin:0}
+.ob-stack{display:grid;gap:12px}
 .template-head{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:8px}
 .template-head .ot{margin:0}
 .clip-template{border-top:1px solid var(--line)}
@@ -1542,6 +1545,14 @@ function setTab(t) {
 }
 
 /* ============================================================ add bar */
+const optOpenCards = new Set(["clips", "style", "layout"]);   // these start open; every other card starts folded
+function optFoldBtn(id) {
+  const open = optOpenCards.has(id), label = open ? i18n.t("Hide this section") : i18n.t("Show this section");
+  return `<button type="button" class="btn sm icon ghost foldbtn${open ? "" : " folded"}" data-act="foldopt" data-card="${id}" aria-expanded="${open}" title="${esc(label)}" aria-label="${esc(label)}">${ic("caret")}</button>`;
+}
+function optBody(id, html) {
+  return `<div class="ob-body"${optOpenCards.has(id) ? "" : " hidden"}>${html}</div>`;
+}
 function drawAdd(variant) {
   const c = creator();
   $("#add").innerHTML = `<form class="composer ${variant === "hero" ? "big" : "compact"}" id="addform">
@@ -1557,30 +1568,38 @@ function drawAdd(variant) {
     <div class="composer-opts" inert><div class="og">
       <section class="ob wide clip-templates" aria-labelledby="clip_template_title">
         <div class="template-head"><h3 class="ot" id="clip_template_title">${i18n.html("Clip templates")}</h3>
-          <button type="button" class="btn sm" data-act="template-save">${ic("plus")}${i18n.html("Save current options")}</button></div>
-        <div id="clip_template_list"></div>
+          <span class="grow"></span>
+          <button type="button" class="btn sm" data-act="template-save">${ic("plus")}${i18n.html("Save current options")}</button>
+          ${optFoldBtn("templates")}</div>
+        ${optBody("templates", `<div id="clip_template_list"></div>`)}
       </section>
       ${langSeg(c?.lang || (S.status.caption_language === "pt-BR" ? "pt" : "en"))}
-      <div class="ob wide"><div class="ot">${i18n.html("Clips")}</div><div class="nsteps">
-        ${stepper("o_max", i18n.t("How many"), c?.max_clips ?? 6, 1, 20, 1, "")}
-        ${stepper("o_min", i18n.t("Shortest"), c?.min_len ?? 15, 5, 120, 5, "s")}
-        ${stepper("o_maxlen", i18n.t("Longest"), c?.max_len ?? 60, 10, 180, 5, "s")}
-      </div></div>
-      <div class="ob wide"><label class="f">${i18n.html("Big text on every clip")} <small>${i18n.html("Optional")}</small>
-        <input id="o_hook" maxlength="60" value="${esc(c?.hook_text || "")}" placeholder="${i18n.html("Left empty, the AI writes a different one for each clip")}"></label></div>
-      <div class="ob wide"><label class="f">${i18n.html("Description for every clip")} <small>${i18n.html("Optional")}</small>
-        <textarea id="o_desc" rows="3" maxlength="2000" placeholder="${i18n.html("Written once, used exactly as typed on every clip.")}">${esc(c?.description_text || "")}</textarea></label></div>
+      <div class="ob wide"><div class="ob-head"><div class="ot">${i18n.html("Clips")}</div>${optFoldBtn("clips")}</div>
+        ${optBody("clips", `<div class="nsteps">
+          ${stepper("o_max", i18n.t("How many"), c?.max_clips ?? 6, 1, 20, 1, "")}
+          ${stepper("o_min", i18n.t("Shortest"), c?.min_len ?? 15, 5, 120, 5, "s")}
+          ${stepper("o_maxlen", i18n.t("Longest"), c?.max_len ?? 60, 10, 180, 5, "s")}
+        </div>`)}</div>
+      <div class="ob wide"><div class="ob-head"><div class="ot">${i18n.html("Text for every clip")}</div>${optFoldBtn("text")}</div>
+        ${optBody("text", `<div class="ob-stack"><label class="f">${i18n.html("Big text on every clip")} <small>${i18n.html("Optional")}</small>
+          <input id="o_hook" maxlength="60" value="${esc(c?.hook_text || "")}" placeholder="${i18n.html("Left empty, the AI writes a different one for each clip")}"></label>
+          <label class="f">${i18n.html("Description for every clip")} <small>${i18n.html("Optional")}</small>
+          <textarea id="o_desc" rows="3" maxlength="2000" placeholder="${i18n.html("Written once, used exactly as typed on every clip.")}">${esc(c?.description_text || "")}</textarea></label></div>`)}</div>
       <div class="ob"><div class="ot cap-head"><span id="o_style_label">${i18n.html("Caption style")}</span>
-        <label><input type="checkbox" id="o_captions" data-caption-toggle ${c?.captions === false ? "" : "checked"}>${i18n.html("Generate captions")}</label></div>
-        ${choice("o_style", Object.entries(S.status.styles).map(([k, v]) => ({v:k, label:v, prev:capPrev(k)})), c?.style ?? "bounce", c?.captions === false)}</div>
-      <div class="ob"><div class="ot">Layout</div>${choice("o_layout", Object.entries(S.status.layouts).map(([k, v]) => ({v:k, label:LAYOUT_SHORT[k] || v, title:i18n.t(v), prev:`<span class="lay-prev ${esc(k)}"><span class="ph"><i></i></span></span>`})), c?.layout ?? "blur")}</div>
-      <div class="ob"><div class="ot">${i18n.html("Video quality")}</div><input type="hidden" id="o_quality" value="720"><div class="seg" role="group" aria-label="${i18n.html("Video quality")}">
-        <button type="button" data-seg="o_quality" data-v="720" aria-pressed="true">720p<small>${i18n.html("Fast")}</small></button>
-        <button type="button" data-seg="o_quality" data-v="1080" aria-pressed="false">1080p<small>${i18n.html("Sharper, about 2x slower")}</small></button></div></div>
-      <div class="ob wide">${interactionOptions(c?.interactions || [])}</div>
-      <div class="ob"><div class="ot">${i18n.html("Part of the video")}</div><div class="range">
-        <label>${i18n.html("From")}<input id="o_from" type="number" min="0" placeholder="${i18n.html("start")}" aria-label="${i18n.html("From minute")}">min</label>${ic("arrowr")}
-        <label>${i18n.html("To")}<input id="o_to" type="number" min="0" placeholder="${i18n.html("end")}" aria-label="${i18n.html("Up to minute")}">min</label></div></div>
+        <label><input type="checkbox" id="o_captions" data-caption-toggle ${c?.captions === false ? "" : "checked"}>${i18n.html("Generate captions")}</label>
+        ${optFoldBtn("style")}</div>
+        ${optBody("style", choice("o_style", Object.entries(S.status.styles).map(([k, v]) => ({v:k, label:v, prev:capPrev(k)})), c?.style ?? "bounce", c?.captions === false))}</div>
+      <div class="ob"><div class="ob-head"><div class="ot">Layout</div>${optFoldBtn("layout")}</div>
+        ${optBody("layout", choice("o_layout", Object.entries(S.status.layouts).map(([k, v]) => ({v:k, label:LAYOUT_SHORT[k] || v, title:i18n.t(v), prev:`<span class="lay-prev ${esc(k)}"><span class="ph"><i></i></span></span>`})), c?.layout ?? "blur"))}</div>
+      <div class="ob"><div class="ob-head"><div class="ot">${i18n.html("Video quality")}</div>${optFoldBtn("quality")}</div>
+        ${optBody("quality", `<input type="hidden" id="o_quality" value="720"><div class="seg" role="group" aria-label="${i18n.html("Video quality")}">
+          <button type="button" data-seg="o_quality" data-v="720" aria-pressed="true">720p<small>${i18n.html("Fast")}</small></button>
+          <button type="button" data-seg="o_quality" data-v="1080" aria-pressed="false">1080p<small>${i18n.html("Sharper, about 2x slower")}</small></button></div>`)}</div>
+      ${interactionOptions(c?.interactions || [], "", true, true)}
+      <div class="ob"><div class="ob-head"><div class="ot">${i18n.html("Part of the video")}</div>${optFoldBtn("range")}</div>
+        ${optBody("range", `<div class="range">
+          <label>${i18n.html("From")}<input id="o_from" type="number" min="0" placeholder="${i18n.html("start")}" aria-label="${i18n.html("From minute")}">min</label>${ic("arrowr")}
+          <label>${i18n.html("To")}<input id="o_to" type="number" min="0" placeholder="${i18n.html("end")}" aria-label="${i18n.html("Up to minute")}">min</label></div>`)}</div>
     </div></div></form>`;
   restoreClipOptions();
   drawClipTemplates();
@@ -1588,15 +1607,17 @@ function drawAdd(variant) {
 }
 const LAYOUT_SHORT = {blur:i18n.t("Blurred fill"), zoom:i18n.t("Zoomed in"), crop:i18n.t("Fill screen"), left:i18n.t("Keep left"), right:i18n.t("Keep right"), fit:i18n.t("Full frame"), split:i18n.t("Two people"), gameplay:"Gameplay + facecam", facecam_top:i18n.t("Facecam on top")};
 const INTERACTION_LABELS = {subscribe:"Subscribe to the channel", like:"Like the video", comment:"Leave a comment", share:"Share the video", save:"Save the video"};
-function interactionOptions(selected, styleFor = "", withStyle = true) {
+function interactionOptions(selected, styleFor = "", withStyle = true, asCard = false) {
   const row = withStyle ? `<div class="style-row">
       <button type="button" class="btn sm" data-act="istyles" data-cid="${esc(styleFor)}">${ic("plus")}${i18n.html("Custom style")}</button>
       <button type="button" class="btn sm" data-act="cmotion" data-cid="${esc(styleFor)}">${ic("play")}${i18n.html("Custom motion")}</button>
       <span class="help style-name" data-style-label data-cid="${esc(styleFor)}"></span></div>` : "";
-  return `<fieldset class="interaction-options"><legend class="ot">${i18n.html("Audience interaction")}</legend>
-    <p class="help">${i18n.html("Optional animated requests, one at a time, without covering captions.")}</p>
+  const fields = `<p class="help">${i18n.html("Optional animated requests, one at a time, without covering captions.")}</p>
     <div class="interaction-checks">${Object.entries(INTERACTION_LABELS).map(([id, label]) =>
-      `<label class="ck"><input type="checkbox" data-interaction value="${id}"${selected.includes(id) ? " checked" : ""}>${i18n.html(label)}</label>`).join("")}</div>${row}</fieldset>`;
+      `<label class="ck"><input type="checkbox" data-interaction value="${id}"${selected.includes(id) ? " checked" : ""}>${i18n.html(label)}</label>`).join("")}</div>${row}`;
+  if (!asCard) return `<fieldset class="interaction-options"><legend class="ot">${i18n.html("Audience interaction")}</legend>${fields}</fieldset>`;
+  return `<div class="ob wide"><div class="ob-head"><div class="ot">${i18n.html("Audience interaction")}</div>${optFoldBtn("interactions")}</div>
+    ${optBody("interactions", `<fieldset class="interaction-options">${fields}</fieldset>`)}</div>`;
 }
 function styleChoice(cid) {
   const c = cid && S.creators.find(x => x.id === cid);
@@ -1871,9 +1892,10 @@ const langName = k => i18n.t(speechLangs()[k]?.label || k);
 function langSeg(value) {
   const languages = speechLangs();
   if (!languages[value]) value = "en";
-  return `<div class="ob wide"><label class="f">${i18n.html("Spoken language")}<select id="o_lang">
-    ${Object.keys(languages).map(k => `<option value="${esc(k)}"${k === value ? " selected" : ""}>${esc(langName(k))}</option>`).join("")}
-    </select></label></div>`;
+  return `<div class="ob wide"><div class="ob-head"><div class="ot">${i18n.html("Spoken language")}</div>${optFoldBtn("lang")}</div>
+    ${optBody("lang", `<label class="f"><select id="o_lang" aria-label="${i18n.html("Spoken language")}">
+      ${Object.keys(languages).map(k => `<option value="${esc(k)}"${k === value ? " selected" : ""}>${esc(langName(k))}</option>`).join("")}
+      </select></label>`)}</div>`;
 }
 const CAP_LOOK = {bounce:{font:"'Archivo Black'", hl:"#FFFF00", up:true}, hype:{font:"Anton", hl:"#FF3C3C", up:true}, clean:{font:"Poppins", hl:"#6BD7FF", up:false, w:800}};
 function capPrev(k) {
@@ -4005,6 +4027,16 @@ document.addEventListener("click", async e => {
     if (a === "menu") return $("#app").classList.toggle("open");
     if (a === "collapse") { const m = $("#app").classList.toggle("mini"); try { localStorage.setItem("mini", m ? "1" : ""); } catch {} return; }
     if (a === "toggleopts") { const p = $(".composer-opts"), open = !p.classList.contains("open"); p.classList.toggle("open", open); p.inert = !open; b.classList.toggle("on", open); b.setAttribute("aria-expanded", String(open)); return; }
+    if (a === "foldopt") {
+      const id = d.card, wasOpen = optOpenCards.has(id);
+      if (wasOpen) optOpenCards.delete(id); else optOpenCards.add(id);
+      b.closest(".ob").querySelector(".ob-body").hidden = wasOpen;
+      b.classList.toggle("folded", wasOpen);
+      b.setAttribute("aria-expanded", String(!wasOpen));
+      const label = i18n.t(wasOpen ? "Show this section" : "Hide this section");
+      b.title = label; b.setAttribute("aria-label", label);
+      return;
+    }
     if (a === "template-save") return saveClipTemplate();
     if (a === "istyles") return openInteractionStyles(d.cid);
     if (a === "cmotion") return openCustomMotion(d.cid);

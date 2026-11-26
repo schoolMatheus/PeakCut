@@ -32,6 +32,7 @@ const peakcutPortuguese = {
   "Videos in that language need the model again. Existing clips stay.": "Para novos vídeos nesse idioma, será necessário baixar o modelo novamente. Os cortes já criados serão mantidos.",
   "Big text on every clip": "Texto de abertura em todos os cortes",
   "Description for every clip": "Descrição para todos os cortes",
+  "Text for every clip": "Texto para todos os cortes",
   "Written once, used exactly as typed on every clip.": "Escreva uma vez para usar exatamente esse texto em todos os cortes.",
   "Left empty, the AI writes a different one for each clip": "Deixe vazio para a IA escrever um texto diferente para cada corte",
   "Keep left": "Manter à esquerda",
