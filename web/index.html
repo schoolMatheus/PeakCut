@@ -1067,6 +1067,27 @@ function ask(title, text, okLabel = i18n.t("Confirm"), danger = false) {
   });
 }
 
+function ytCookieTutorial() {
+  const d = $("#formdlg");
+  if (d.open) return;
+  const steps = [
+    i18n.html("Install the extension Get cookies.txt LOCALLY in Chrome or Edge, then allow it in incognito: open chrome://extensions, find the extension, Details, and turn on Allow in incognito."),
+    i18n.html("Open one incognito window and sign in to YouTube there. A secondary account is safer than your main one."),
+    i18n.html("In that same tab, open {0} and close the other incognito tabs. This keeps YouTube from rotating the cookies.", `<code>${esc("https://www.youtube.com/robots.txt")}</code>`),
+    i18n.html("Click the extension icon, leave the format as Netscape (it is the default), and press Export. A cookies.txt file is downloaded."),
+    i18n.html("Open that file in Notepad, copy everything, paste it into the Paste YouTube cookies box here, and press Save cookies. PeakCut tries again straight away."),
+    i18n.html("Close the incognito window. Treat the file like a password and never share it. If downloads fail again later, export fresh cookies.")
+  ];
+  d.innerHTML = `<form method="dialog" class="dlg" style="max-height:80vh;overflow:auto">
+    <h2>${i18n.html("When do I need YouTube cookies?")}</h2>
+    <p class="help">${i18n.html("This is for the error YouTube isn't letting PeakCut download videos right now, or Sign in to confirm you're not a bot. YouTube refuses downloads from this server's address: it thinks the server is a bot. The link and the video are fine.")}</p>
+    <p class="help">${i18n.html("Cookies from your own signed-in browser let YouTube see a real person. Until you add them, uploading the video file or using a Twitch or Kick link still works.")}</p>
+    <ol class="help">${steps.map(s => `<li>${s}</li>`).join("")}</ol>
+    <p class="help">${i18n.html("The cookies stay on this computer and are never shown on the page again.")}</p>
+    <div class="dlg-foot"><button class="btn primary" value="ok" autofocus>${i18n.html("Got it")}</button></div></form>`;
+  d.returnValue = ""; d.showModal();
+}
+
 /* ============================================================ guided tour */
 function startTour() {
   if ($("#tour")) return;
@@ -3291,7 +3312,8 @@ async function drawSocialAccounts() {
         <p class="help">${i18n.html(youtubeCookies.saved ? "Cookies saved" : "No cookies saved")}</p>
         <label class="f">${i18n.html("Paste YouTube cookies")}<textarea id="ytc" rows="4" autocomplete="off" spellcheck="false" maxlength="1000000"></textarea></label>
         <div class="row"><button class="btn" data-act="ytcookies">${i18n.html("Save cookies")}</button>
-          ${youtubeCookies.saved ? `<button class="btn ghost" data-act="ytcookies" data-remove="1">${i18n.html("Remove cookies")}</button>` : ""}</div></section>` : ""}`;
+          ${youtubeCookies.saved ? `<button class="btn ghost" data-act="ytcookies" data-remove="1">${i18n.html("Remove cookies")}</button>` : ""}
+          <button class="btn sm ghost" data-act="ytcookietutorial">${ic("play")}${i18n.html("Cookies tutorial")}</button></div></section>` : ""}`;
   } catch (e) { if (body.isConnected) body.innerHTML = `<div class="set-load" role="alert">${esc(i18n.detail(e.message))}</div>`; }
 }
 
@@ -4180,6 +4202,7 @@ document.addEventListener("click", async e => {
     if (a === "storcancel") { await send("/api/storage", {cancel: true}, "PUT"); toast(i18n.t("Kept the current folder"), "ok"); return drawSettings(); }
     if (a === "appsetup") { S.setupOpen = d.p && S.setupOpen !== d.p ? d.p : ""; return drawSocialAccounts(); }
     if (a === "copytext") { await navigator.clipboard.writeText(d.t); return toast(i18n.t("Copied"), "ok"); }
+    if (a === "ytcookietutorial") return ytCookieTutorial();
     if (a === "ytcookies") {
       b.disabled = true;
       try {
