@@ -200,6 +200,26 @@ with ctx.as_user(user.id):
     accounts._tt_token(accounts.get(ttacc["id"]))
     check("TikTok: an old sign-in is renewed, and the new refresh token kept", accounts.get(ttacc["id"])["refresh_token"], "tt-refresh-2")
 
+# ---- Google revoking a YouTube sign-in has to say how to fix it, not print Google's JSON
+calls.clear()
+def refused_refresh(url, data=None, **kw):
+    if url == "https://oauth2.googleapis.com/token" and data and data.get("grant_type") == "refresh_token":
+        return R(400, {"error": "invalid_grant", "error_description": "Token has been expired or revoked."})
+    return post(url, data=data, **kw)
+accounts.httpx.post = refused_refresh
+with ctx.as_user(user.id):
+    yt = accounts.get(accs["youtube"]["id"])
+    accounts._put({**yt, "expires": 0})
+    message, detail = "", ""
+    try:
+        accounts._yt_token(accounts.get(accs["youtube"]["id"]))
+    except RuntimeError as e:
+        message = str(e)
+    detail = accounts.get(accs["youtube"]["id"]).get("detail", "")
+check("YouTube: a revoked sign-in says to connect again, without Google's JSON",
+      "connect" in message.lower() and '"error"' not in message, True)
+check("YouTube: a revoked sign-in is marked on the account", "expired" in detail.lower(), True)
+
 print("ALL PASSED" if not fails else f"{len(fails)} failed")
 import shutil; db.engine.dispose(); shutil.rmtree(os.environ["PEAKCUT_DATA"], ignore_errors=True)
 sys.exit(1 if fails else 0)

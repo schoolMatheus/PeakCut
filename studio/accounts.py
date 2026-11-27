@@ -374,11 +374,21 @@ def _yt_token(acc) -> str:
     if acc.get("expires", 0) > time.time():
         return acc["access_token"]
     cid, secret = app_keys("google")
-    tok = _check(httpx.post("https://oauth2.googleapis.com/token", data={
+    response = httpx.post("https://oauth2.googleapis.com/token", data={
         "client_id": cid, "client_secret": secret,
-        "refresh_token": acc["refresh_token"], "grant_type": "refresh_token"}, timeout=30),
-        "Refreshing the YouTube sign-in").json()
-    acc.update(access_token=tok["access_token"], expires=time.time() + tok.get("expires_in", 3600) - 60)
+        "refresh_token": acc["refresh_token"], "grant_type": "refresh_token"}, timeout=30)
+    if response.status_code >= 400:
+        try:
+            body = response.json()
+        except ValueError:
+            body = {}
+        if (body.get("error") if isinstance(body, dict) else None) == "invalid_grant":
+            acc.update(access_token="", expires=0,
+                       detail="Sign-in expired: connect this channel again to keep posting.")
+            _put(acc)
+            raise RuntimeError("The YouTube sign-in has expired. Open Social networks and connect the channel again.")
+    tok = _check(response, "Refreshing the YouTube sign-in").json()
+    acc.update(detail="", access_token=tok["access_token"], expires=time.time() + tok.get("expires_in", 3600) - 60)
     _put(acc)
     return acc["access_token"]
 

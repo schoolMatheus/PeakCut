@@ -63,11 +63,13 @@ def forget_video(jid, cid=None):
 
 
 def _drop_deleted():
-    """Clear posts left behind by videos or clips deleted before this fix, so they stop showing up on the page."""
+    """Clear posts left behind by videos or clips deleted before this fix, so they stop showing up on the page.
+    This runs at startup, before anyone is signed in, so it reads all jobs the way background work does."""
     with _lock:
+        known = {j["id"]: j for j in jobs.all_jobs()}
         gone = []
         for p in _posts:
-            job = jobs.get(p.get("job"))
+            job = known.get(p.get("job"))
             if not job or not any(c["id"] == p.get("clip") for c in job["clips"]):
                 gone.append(p)
         _drop(gone)
@@ -161,8 +163,10 @@ def _current_slot(t, windows, cap):
     return _at_offset(spans, math.floor(elapsed / step + 1e-9) * step)
 
 
-def _next_slot(account_id, c, *, earliest=0, exclude=()):
-    """Reserve the next time for this account, following its ranges, fixed times and daily limit."""
+def _next_slot(account_id, c, *, earliest=0, exclude=(), rescheduling=False):
+    """Reserve the next time for this account, following its ranges, fixed times and daily limit. While moving
+    posts that are already waiting, start from now: their old times are what we are changing, not a queue to get
+    behind."""
     mine = [p for p in _mine() if p["account"] == account_id and p["status"] in OPEN + ("posted",)
             and p["id"] not in exclude]
     fixed = _fixed_times(c)
@@ -170,7 +174,7 @@ def _next_slot(account_id, c, *, earliest=0, exclude=()):
         return _next_fixed(mine, fixed, c, earliest)
     window = _windows(c)
     cap = c["daily_cap"] if c.get("daily_cap_enabled", False) else None
-    last = max((p.get("posted_at") or p["due_at"] for p in mine), default=0)
+    last = 0 if rescheduling else max((p.get("posted_at") or p["due_at"] for p in mine), default=0)
     t = max(time.time(), earliest, last + (0.001 if window and cap else c["post_gap_min"] * 60))
     while True:
         if window:
@@ -205,20 +209,26 @@ def _next_fixed(mine, fixed, c, earliest):
         t = _next_day(t)
 
 
-def _scheduled_at(account_id, c, *, earliest=0, exclude=()):
-    return _next_slot(account_id, c, earliest=earliest, exclude=exclude)
+def _scheduled_at(account_id, c, *, earliest=0, exclude=(), rescheduling=False):
+    return _next_slot(account_id, c, earliest=earliest, exclude=exclude, rescheduling=rescheduling)
 
 
-def _reschedule_accounts(account_ids):
-    """Keep waiting clips in order when times change or the app missed a window."""
+def _reschedule_accounts(account_ids, creator_id=None):
+    """Keep waiting clips in order when times change or the app missed a window. With a creator, only that
+    creator's clips move: another creator's queue on the same account keeps the times it was given."""
     with _lock:
         pending = sorted((p for p in _mine() if p["account"] in account_ids and p["status"] == "scheduled"
-                          and not p.get("immediate")), key=lambda p: (p["due_at"], p["created"]))
+                          and not p.get("immediate") and (creator_id is None or p["creator"] == creator_id)),
+                         key=lambda p: (p["due_at"], p["created"]))
         excluded = {p["id"] for p in pending}
+        placed = {}          # last new time given on each account, so the next post takes a later slot
         changed = []
         for p in pending:
             c = creators.get(p["creator"]) or creators.DEFAULTS
-            due = _scheduled_at(p["account"], c, earliest=p.get("retry_at", 0), exclude=excluded)
+            earlier = placed.get(p["account"], 0)
+            earliest = max(p.get("retry_at", 0), earlier + 0.001 if earlier else 0)
+            due = _scheduled_at(p["account"], c, earliest=earliest, exclude=excluded, rescheduling=True)
+            placed[p["account"]] = due
             if due != p["due_at"]:
                 p["due_at"] = due
                 changed.append(p)
@@ -233,7 +243,7 @@ def _reschedule_accounts(account_ids):
 def reschedule(creator_id):
     with _lock:
         affected = {p["account"] for p in _mine() if p["creator"] == creator_id and p["status"] == "scheduled"}
-        _reschedule_accounts(affected)
+        _reschedule_accounts(affected, creator_id)
 
 
 def enqueue(job, clip, account_ids, now=False) -> list:

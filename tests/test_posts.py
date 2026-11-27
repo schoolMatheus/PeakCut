@@ -342,6 +342,26 @@ class BatchPosts(unittest.TestCase):
         mirrored = jobs.get(self.job["id"])["clips"][1]["posts"][posting._posts[1]["id"]]
         self.assertEqual(mirrored["due_at"], datetime(2026, 11, 20, 11).timestamp())
 
+    def test_changing_one_creators_daily_limit_leaves_other_creators_queue_alone(self):
+        first = self.window(daily_cap=2)
+        second = creators.create({**first, "name": "Second creator"})
+        other_job = jobs.create({"type": "file", "name": "Second video"}, {}, enqueue=False, creator=second["id"])
+        other_job["clips"] = [{"id": f"other-{i}", "status": "done"} for i in range(3)]
+        jobs.save(other_job)
+        now = datetime(2026, 11, 20, 8).timestamp()
+        with patch("studio.posting.time.time", return_value=now):
+            self.queue_clips(3)
+            for clip in other_job["clips"]:
+                posting.enqueue(other_job, clip, ["youtube"])
+            before = [p["due_at"] for p in posting._posts if p["creator"] == second["id"]]
+            response = self.client.put(f"/api/creators/{first['id']}", json={"daily_cap": 4},
+                                       headers={"Origin": "http://localhost"})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(before, [datetime(2026, 11, 21, 15).timestamp(),
+                                  datetime(2026, 11, 22, 9).timestamp(),
+                                  datetime(2026, 11, 22, 15).timestamp()])
+        self.assertEqual([p["due_at"] for p in posting._posts if p["creator"] == second["id"]], before)
+
     def test_manual_post_now_bypasses_window(self):
         self.window()
         now = datetime(2026, 11, 20, 23).timestamp()
@@ -511,7 +531,7 @@ class BatchPosts(unittest.TestCase):
             {"id": "old", "user": self.owner.id, "job": "missing", "clip": "gone", "status": "scheduled", "due_at": 0},
             {"id": "keep", "user": self.owner.id, "job": self.job["id"], "clip": "one", "status": "scheduled", "due_at": 0},
         ])
-        with patch("studio.posting.threading.Thread"):
+        with ctx.as_user(None), patch("studio.posting.threading.Thread"):   # the server starts before anyone signs in
             posting.start()
         self.assertEqual([p["id"] for p in posting._posts], ["keep"])
 
