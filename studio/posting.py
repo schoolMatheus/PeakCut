@@ -34,6 +34,17 @@ def _save():
         tmp.replace(_FILE)
 
 
+def _drop(gone):
+    """Forget these posts for good and tell the page their queue changed."""
+    if not gone:
+        return
+    ids = {p["id"] for p in gone}
+    _posts[:] = [p for p in _posts if p["id"] not in ids]
+    _save()
+    for uid in {p.get("user") for p in gone if p.get("user")}:
+        ctx.bump(uid)
+
+
 def forget(uid: str):
     """Drop everything queued or recorded for a deleted account, so nothing is posted or retried for it any more."""
     with _lock:
@@ -42,6 +53,24 @@ def forget(uid: str):
                 p["status"] = "deleted"          # the posting loop may be holding this one already: it then skips it
         _posts[:] = [p for p in _posts if p.get("user") != uid]
         _save()
+
+
+def forget_video(jid, cid=None):
+    """Drop the posts of a deleted video, or of just one of its clips. They must leave the timeline and the history
+    for good: there is nothing left to post, and a deleted clip must not keep failing in the background."""
+    with _lock:
+        _drop([p for p in _posts if p.get("job") == jid and (cid is None or p.get("clip") == cid)])
+
+
+def _drop_deleted():
+    """Clear posts left behind by videos or clips deleted before this fix, so they stop showing up on the page."""
+    with _lock:
+        gone = []
+        for p in _posts:
+            job = jobs.get(p.get("job"))
+            if not job or not any(c["id"] == p.get("clip") for c in job["clips"]):
+                gone.append(p)
+        _drop(gone)
 
 
 def _day(t):
@@ -496,6 +525,7 @@ def digest_text() -> str:
 
 def start():
     with _lock:
+        _drop_deleted()
         for p in _posts:
             if p["status"] == "posting":  # interrupted mid-upload last time
                 p.update(status="failed", error="The studio closed during this upload. Check the account, then retry.")

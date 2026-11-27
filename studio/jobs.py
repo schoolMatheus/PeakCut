@@ -394,6 +394,8 @@ def delete(jid):
         if job:
             _by_user.get(job["user"], {}).pop(jid, None)
     if job:
+        from . import posting           # imported here: the queue already imports this module
+        posting.forget_video(jid)       # no posts for a video that no longer exists
         ctx.bump(job["user"])
         shutil.rmtree(job["dir"], ignore_errors=True)
     return bool(job)

@@ -49,6 +49,8 @@ def delete_clip(jid: str, cid: str) -> bool:
             p.unlink(missing_ok=True)
             if p.suffix == ".ts":
                 p.with_suffix(".preview.mp4").unlink(missing_ok=True)
+    from . import posting
+    posting.forget_video(jid, cid)                 # a deleted clip must not stay in the post queue or history
     ctx.bump()
     return True
 

@@ -15,7 +15,7 @@ os.environ.update(PEAKCUT_DATA=tempfile.mkdtemp(prefix="pc-posts-"), DATABASE_UR
                   PEAKCUT_ACCOUNTS="1", PEAKCUT_VERIFY_EMAIL="0")
 
 from fastapi.testclient import TestClient
-from studio import accounts, auth, creators, ctx, db, jobs, posting, server
+from studio import account, accounts, auth, creators, ctx, db, jobs, posting, server
 
 
 class BatchPosts(unittest.TestCase):
@@ -482,6 +482,38 @@ class BatchPosts(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         row = next(c for c in response.json() if c["id"] == self.job["creator"])
         self.assertEqual([p["title"] for p in row["timeline"]], ["one"])
+
+    def test_deleting_a_video_takes_its_waiting_posts_and_history_out(self):
+        self.assertEqual(self.post().status_code, 200)
+        posting._posts[0].update(status="posted", posted_at=time.time())
+        self.job["status"] = "done"
+        jobs.save(self.job)
+        self.assertEqual(len(posting.timeline(self.job["creator"])), 1)
+        self.assertEqual(account.delete_many([self.job["id"]], []), {"videos": 1, "clips": 0, "skipped": 0})
+        self.assertEqual(posting.timeline(self.job["creator"]), [])
+        self.assertEqual(posting._posts, [])
+        self.assertNotIn(self.job["id"], posting._FILE.read_text(encoding="utf-8"))
+
+    def test_deleting_one_clip_takes_only_its_posts_out_of_the_timeline(self):
+        self.assertEqual(self.post().status_code, 200)
+        self.assertTrue(account.delete_clip(self.job["id"], "one"))
+        self.assertEqual([p["title"] for p in posting.timeline(self.job["creator"])], ["two"])
+        self.assertEqual([p["clip"] for p in posting._posts], ["two"])
+
+    def test_posts_of_an_already_deleted_video_never_reach_the_timeline(self):
+        self.assertEqual(self.post(clips=self.pairs[:1]).status_code, 200)
+        jobs.delete(self.job["id"])
+        self.assertEqual(posting.timeline(self.job["creator"]), [])
+        self.assertEqual(posting._posts, [])
+
+    def test_old_posts_of_deleted_videos_are_cleared_when_the_queue_starts(self):
+        posting._posts.extend([
+            {"id": "old", "user": self.owner.id, "job": "missing", "clip": "gone", "status": "scheduled", "due_at": 0},
+            {"id": "keep", "user": self.owner.id, "job": self.job["id"], "clip": "one", "status": "scheduled", "due_at": 0},
+        ])
+        with patch("studio.posting.threading.Thread"):
+            posting.start()
+        self.assertEqual([p["id"] for p in posting._posts], ["keep"])
 
 
 if __name__ == "__main__":
