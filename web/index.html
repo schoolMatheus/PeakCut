@@ -947,6 +947,21 @@ dialog[open]{animation:fadein .16s ease}
 }
 @media (max-width:480px){.utabs .tabbtn svg{display:none}}
 @media (max-width:360px){.utabs .tabbtn{font-size:12px;gap:6px;padding:0 6px}}
+.creation-grid{display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:32px;max-width:1300px}
+.creation-main,.creation-side{min-width:0}.creation-form{display:grid;gap:16px;margin:20px 0}
+.creation-form input,.creation-form textarea,.creation-form select,.creation-controls input,.creation-feedback textarea{width:100%}
+.creation-side{border-left:1px solid var(--line);padding-left:24px}.creation-side h3{font-size:16px;font-weight:500}
+.creation-side details,.creation-current details{border-top:1px solid var(--line);padding:16px 0;margin-top:16px}
+.creation-side summary,.creation-current summary{cursor:pointer;font-weight:500;margin-bottom:12px}
+.creation-projects,.creation-documents{padding:0;list-style:none}.creation-projects li{border-bottom:1px solid var(--line)}
+.creation-projects button{background:none;border:0;width:100%;text-align:left;padding:12px 0;cursor:pointer}
+.creation-projects button:hover{color:var(--brand-deep)}.creation-projects b{display:block;font-weight:500}.creation-projects span{color:var(--dim);font-size:12px}
+.creation-current{border-top:1px solid var(--line-2);padding-top:24px;margin-top:24px}.creation-current h2{font-size:22px;font-weight:500}
+.creation-message{margin:12px 0 20px;overflow-wrap:anywhere}.creation-preview{display:block;aspect-ratio:9/16;width:min(100%,340px);max-height:70vh;background:var(--frame);object-fit:contain;margin:16px 0}
+.creation-controls,.creation-feedback{margin:20px 0}.creation-feedback{display:grid;gap:16px}.creation-documents li{padding:8px 0;overflow-wrap:anywhere}
+.creation-current a{color:var(--brand-deep)}.creation-current a.btn.primary{color:var(--brand-ink)}
+.creation-side audio{width:100%;margin-top:12px}.creation-side .row{flex-wrap:wrap}.creation-form .row>.f{flex:1;min-width:130px}
+@media(max-width:1050px){.creation-grid{grid-template-columns:minmax(0,1fr)}.creation-side{border-left:0;border-top:1px solid var(--line);padding:24px 0 0}}
 </style>
 </head>
 <body>
@@ -977,6 +992,7 @@ dialog[open]{animation:fadein .16s ease}
 <script src="/assets/pt-br.js?v=20261118-2"></script>
 <script src="/assets/i18n.js?v=20261118-2"></script>
 <script src="/assets/gradient-ascii.js"></script>
+<script src="/assets/creation.js?v=20261127-3"></script>
 <script>
 /* ============================================================ helpers */
 const $ = (s, r = document) => r.querySelector(s);
@@ -1412,6 +1428,7 @@ function drawShell() {  const nav = (v, icon, label, extra = "") => `<button cla
     nav("library", navIc("film", "library"), i18n.t("All videos"), (() => { const w = S.jobs.filter(j => ["queued", "running"].includes(j.status)).length;
       return w ? `<span class="working" title="${i18n.html("{0} working now", w)}"><i></i>${i18n.html("{0} working", w)}</span>` : S.jobs.length ? `<span class="count">${S.jobs.length}</span>` : ""; })()) +
     nav("editor", navIc("scissors", "editor"), i18n.t("Clip editor")) +
+    nav("create", ic("plus"), i18n.t("Create video")) +
     nav("social", navIc("plug", "social"), i18n.t("Social networks")) +
     `<h4><span>${i18n.html("Creators")}</span></h4>` +
     S.creators.map(c => nav("c:" + c.id, cav(c), c.name,
@@ -1428,7 +1445,7 @@ function drawShell() {  const nav = (v, icon, label, extra = "") => `<button cla
       <button class="icon-btn bell" data-act="bell" title="${i18n.html("Notifications")}" aria-label="${i18n.html("Notifications{0}", S.status.unread ? i18n.t(", {0} new", S.status.unread) : "")}" aria-haspopup="dialog">${ic("bell")}${S.status.unread ? `<span class="dotn">${S.status.unread > 9 ? "9+" : S.status.unread}</span>` : ""}</button></div>` : ""));
   const c = creator();
   const recording = S.creators.filter(x => x.live_job).length;
-  let title = {overview:i18n.t("Home"), library:i18n.t("All videos"), editor:i18n.t("Clip editor"), social:i18n.t("Social networks"), settings:i18n.t("Settings"), usage:i18n.t("AI usage")}[S.view] || "", sub = "", act = "";
+  let title = {overview:i18n.t("Home"), library:i18n.t("All videos"), editor:i18n.t("Clip editor"), create:i18n.t("Create video"), social:i18n.t("Social networks"), settings:i18n.t("Settings"), usage:i18n.t("AI usage")}[S.view] || "", sub = "", act = "";
   if (S.view === "social") sub = i18n.t("Connect your accounts to publish clips.");
   if (S.view === "usage") sub = i18n.t("What the AI has been used for.");
   if (S.view === "overview") {
@@ -1465,13 +1482,13 @@ function drawShell() {  const nav = (v, icon, label, extra = "") => `<button cla
   const aiBar = !toolBar && S.status.ai?.problem && me?.is_admin && S.view !== "settings" ? `<div class="vb" role="status">${ic("warn")}<span><b>${i18n.html("The AI isn't answering.")}</b> ${i18n.html("{0} Until then, clips are picked by loudness.", esc(i18n.detail(S.status.ai.problem)))}</span><button class="btn sm primary" data-act="go" data-v="settings" data-tab="ai">${i18n.html("Open AI settings")}</button></div>` : "";
   const diskBar = !toolBar && S.status.disk_full && S.view !== "settings" ? `<div class="vb" role="alert">${ic("warn")}<span><b>${i18n.html("The drive PeakCut saves to is almost full, so it can't take new videos.")}</b> ${i18n.html("Free up space on it, or move PeakCut's folder to a bigger drive.")}</span>${me?.is_admin ? `<button class="btn sm primary" data-act="go" data-v="settings" data-tab="storage">${i18n.html("Open Storage")}</button>` : ""}</div>` : "";
   put($("#vbanner"), toolBar ? toolBar : diskBar ? diskBar : aiBar ? aiBar : upBar ? upBar : me && me.verified === false ? `<div class="vb" role="status">${ic("warn")}<span>${i18n.html("Confirm your email to start clipping. We sent a link to")} <b>${esc(me.email)}</b>.</span><button class="btn sm" data-act="resendverify">${i18n.html("Send a new link")}</button></div>`
-    : kk && kk.ready === false && S.view !== "usage" && S.view !== "editor" ? `<div class="vb" role="status">${ic("bolt")}<span>${me?.is_admin ? i18n.t("Add your AI key to let the AI pick clips and write titles. Until then, clips are picked by loudness.") : i18n.t("The AI isn't set up on this server yet, so clips are picked by loudness.")}</span>${me?.is_admin && S.view !== "settings" ? `<button class="btn sm primary" data-act="go" data-v="settings" data-tab="ai">${ic("plus")}${i18n.html("Add AI key")}</button>` : ""}</div>` : "");
+    : kk && kk.ready === false && S.view !== "usage" && S.view !== "editor" && S.view !== "create" ? `<div class="vb" role="status">${ic("bolt")}<span>${me?.is_admin ? i18n.t("Add your AI key to let the AI pick clips and write titles. Until then, clips are picked by loudness.") : i18n.t("The AI isn't set up on this server yet, so clips are picked by loudness.")}</span>${me?.is_admin && S.view !== "settings" ? `<button class="btn sm primary" data-act="go" data-v="settings" data-tab="ai">${ic("plus")}${i18n.html("Add AI key")}</button>` : ""}</div>` : "");
   put($("#tpic"), pic); $("#tpic").classList.toggle("live", !!(c && (c.live_job || liveOn(c).length)));
   put($("#utabs"), tabs); moveInd(); $(".topbar").classList.toggle("tabbed", !!tabs);
   put($("#title"), `<span>${esc(title)}</span>`); put($("#subtitle"), subHtml ?? esc(sub)); put($("#actions"), act + i18n.toggleButton(true));
 }
 
-const ROUTES = {overview: "", library: "videos", editor: "editor", social: "social", settings: "settings", usage: "usage"};
+const ROUTES = {overview: "", library: "videos", editor: "editor", create: "create", social: "social", settings: "settings", usage: "usage"};
 function pathFor(v, tab) {
   if (v.startsWith("c:")) return `/app/creators/${encodeURIComponent(v.slice(2))}${tab && tab !== "clips" ? "/" + tab : ""}`;
   if (v === "settings") return "/app/settings" + (tab ? "/" + tab : "");
@@ -1521,6 +1538,7 @@ function go(v, tab, fromHistory) {
   if (v === "overview") view.innerHTML = `<div id="ov"></div>`;
   else if (v === "library") view.innerHTML = `<div id="add"></div><div id="jobs"></div>`;
   else if (v === "editor") view.innerHTML = `<div id="editor-picker"></div><div id="editor-panel"></div>`;
+  else if (v === "create") { view.innerHTML = `<div id="creation-panel"></div>`; window.PeakCutCreation.mount(); }
   else if (v === "social") view.innerHTML = `<div id="social" class="set-body"></div>`;
   else if (v === "settings") view.innerHTML = `<div id="sform"></div>`;
   else if (v === "usage") { view.innerHTML = `<div id="usage"></div>`; loadUsage(); }
@@ -2949,8 +2967,8 @@ function drawUsage() {
 /* ============================================================ settings */
 // With sign-in off there is no profile or password to manage. The AI section is for whoever runs the server.
 const setTabs = () => [
-  ...(S.status.user?.is_admin ? [["ai", i18n.t("AI"), "bolt", i18n.t("Your AI service, model and key")],
-                               ["subscription", i18n.t("AI subscription"), "user", i18n.t("ChatGPT and Claude plans")]] : []),
+  ["ai", i18n.t("AI"), "bolt", S.status.user?.is_admin ? i18n.t("Your AI service, model and key") : "Narração dos seus vídeos"],
+  ...(S.status.user?.is_admin ? [["subscription", i18n.t("AI subscription"), "user", i18n.t("ChatGPT and Claude plans")]] : []),
   ...(S.status.accounts === false ? [] : [["profile", i18n.t("Profile"), "user", i18n.t("Your name, email and how you sign in")],
                                           ["security", i18n.t("Security"), "lock", i18n.t("Password and signing out")]]),
   ["language", i18n.t("Language"), "language", i18n.t("Change the interface and caption languages")],
@@ -3204,7 +3222,11 @@ async function drawSettings() {
       }
       await claudeDrawn;
     }
-    if (tab === "ai") {
+    if (tab === "ai" && !me?.is_admin) {
+      body.innerHTML = `<section class="set-sec"><h2>${i18n.html("AI")}</h2><p class="help">A IA de texto é configurada pelo responsável pelo servidor. A chave de narração abaixo pertence somente à sua conta.</p></section><section class="set-sec" id="narration-settings"></section>`;
+      await window.PeakCutCreation.mountNarrationSettings($("#narration-settings"));
+    }
+    if (tab === "ai" && me?.is_admin) {
       const k = await api("/api/ai");
       if (!body.isConnected) return;
       S.ai = k;
@@ -3220,8 +3242,9 @@ async function drawSettings() {
             <label class="f">${i18n.html("Model")}<span class="with"><input id="ai_model" list="ai_models" value="${esc(same ? k.models.join(", ") : "")}" spellcheck="false"><button class="btn" type="button" data-act="aimodels">${i18n.html("Find models")}</button></span>
               <datalist id="ai_models"></datalist><span class="hint" id="ai_modelhint">${i18n.html("A fast, inexpensive model is the right choice. Add a second one after a comma to fall back on.")}</span></label>
           </div>
-          <div class="row" style="margin-top:20px"><button class="btn primary" data-act="aisave">${i18n.html("Save and test")}</button>${k.ready ? `<button class="btn" data-act="aitest">${i18n.html("Test again")}</button>` : ""}</div></section>`;
+          <div class="row" style="margin-top:20px"><button class="btn primary" data-act="aisave">${i18n.html("Save and test")}</button>${k.ready ? `<button class="btn" data-act="aitest">${i18n.html("Test again")}</button>` : ""}</div></section><section class="set-sec" id="narration-settings"></section>`;
       aiHints();
+      await window.PeakCutCreation.mountNarrationSettings($("#narration-settings"));
     }
     if (tab === "speech") {
       const r = await api("/api/speech");
@@ -3729,6 +3752,7 @@ function render() {
   if (S.view === "editor") drawEditorPage();
   else if (D.jid) drawClipEditor(false);
   updateStyleLabels();
+  if (S.view === "create") window.PeakCutCreation.refresh(S.creation);
 }
 async function tick() {
   try {
@@ -3743,6 +3767,7 @@ async function tick() {
     // a server from before multi-channel support sends only `channel`: show it as that platform's channel
     creators.forEach(c => { if (!c.channels) { const u = c.channel || "", k = /youtu/i.test(u) ? "youtube" : /twitch/i.test(u) ? "twitch" : /kick/i.test(u) ? "kick" : ""; c.channels = k ? {[k]: u} : {}; } });
     S.jobs = jobs; S.creators = creators; S.accounts = accounts;
+    S.creation = got.creation || [];
     S.clipTemplates = got.clip_templates || [];
     drawClipTemplates();
     if (got.ai) S.status.ai = got.ai;

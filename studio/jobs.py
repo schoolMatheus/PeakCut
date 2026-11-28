@@ -374,6 +374,11 @@ def submit(fn):
     _q.put(("fn", ctx.bind(fn), None))
 
 
+def submit_user(fn):
+    """Long creation work shares the same fair turns as uploaded videos."""
+    _q.put(("user_fn", ctx.bind(fn), None), user=ctx.uid())
+
+
 def submit_live(fn):
     """Live-stream renders and cleanups: their own worker, so a long video can never hold them up."""
     _live_q.put(ctx.bind(fn))
@@ -1142,6 +1147,14 @@ def _run_job(job):
 def _worker(quick_only=False):
     while True:
         kind, a, cid = _q.get(quick_only)
+        if kind == "user_fn":
+            try:
+                a()
+            except Exception:  # noqa: BLE001
+                traceback.print_exc()
+            finally:
+                _q.done()
+            continue
         if kind == "fn":
             try:
                 a()

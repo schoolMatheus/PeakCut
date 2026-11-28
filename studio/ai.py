@@ -384,19 +384,22 @@ def _parse(text):
 
 
 # ---------------------------------------------------------------- one call
-def call(model: str, prompt: str, schema: dict, timeout: float | None = None):
+def call(model: str, prompt: str, schema: dict, timeout: float | None = None, *, prompt_factory=None):
     """Ask one model. Returns (the parsed JSON answer, tokens sent, tokens written back).
 
     `timeout` is how long one answer may take. A live stream passes a short one, because a slow
     answer must not stop the recording."""
     how = PROVIDERS[provider()][2]
     if how == "codex":
+        prompt = prompt_factory() if prompt_factory else prompt
         text, sent, wrote = codex.run(model, prompt, schema=schema, timeout=timeout, reasoning_effort=current()["reasoning_effort"])
         return _parse(text), sent, wrote
     if how == "claude_sub":
+        prompt = prompt_factory() if prompt_factory else prompt
         text, sent, wrote = claude_cli.run(model, _wrapped(prompt, schema), timeout=timeout, reasoning_effort=current()["reasoning_effort"])
         return _parse(text), sent, wrote
-    return {"gemini": _gemini, "openai": _openai, "anthropic": _anthropic}[how](model, prompt, schema, timeout)
+    extra = {"prompt_factory": prompt_factory} if prompt_factory else {}
+    return {"gemini": _gemini, "openai": _openai, "anthropic": _anthropic}[how](model, prompt, schema, timeout, **extra)
 
 
 def see(prompt: str, image: bytes, timeout: float | None = None) -> tuple[str, int, int]:
@@ -465,20 +468,113 @@ def draw(prompt: str, image: bytes | None = None, timeout: float | None = None, 
     raise ValueError("Drawing new pictures needs a Codex subscription. Pick Codex in Settings, or use the drawn motions instead.")
 
 
+# Creation services use private per-user settings, independently of clip analysis.
+def creation_speech(settings, text, direction, output):
+    from pathlib import Path
+    if not settings.get("key") or not settings.get("voice") or not settings.get("model"):
+        raise ValueError("Configure o serviço, o modelo, a voz e a chave de narração na aba Criar vídeo.")
+    if not isinstance(text, str) or not text.strip() or len(text) > 4096:
+        raise ValueError("Divida a narração em trechos de até 4.096 caracteres.")
+    provider_id = settings.get("provider")
+    if provider_id == "openai":
+        body = {"model": settings["model"], "voice": settings["voice"], "input": text,
+                "response_format": "mp3", "speed": float(settings.get("speed", 1))}
+        if settings["model"] not in ("tts-1", "tts-1-hd") and direction:
+            body["instructions"] = direction
+        url, headers = "https://api.openai.com/v1/audio/speech", {"Authorization": "Bearer " + settings["key"]}
+    elif provider_id == "elevenlabs":
+        from urllib.parse import quote
+        voice_settings = {k: float(settings[k]) for k in ("stability", "similarity_boost", "style", "speed") if k in settings}
+        body = {"text": text, "model_id": settings["model"], "voice_settings": voice_settings}
+        url = "https://api.elevenlabs.io/v1/text-to-speech/" + quote(settings["voice"], safe="")
+        headers = {"xi-api-key": settings["key"]}
+    else:
+        raise ValueError("Serviço de voz desconhecido.")
+    try:
+        result = httpx.post(url, json=body, headers=headers, timeout=180, follow_redirects=False)
+    except httpx.HTTPError:
+        raise AIError("Não foi possível conectar ao serviço de narração.") from None
+    if result.status_code != 200:
+        raise AIError(f"O serviço de narração respondeu HTTP {result.status_code}. Confira a chave, a voz e o modelo.")
+    if not result.headers.get("content-type", "").startswith(("audio/", "application/octet-stream")) or not result.content:
+        raise AIError("O serviço de narração não retornou um arquivo de áudio.")
+    if len(result.content) > 40_000_000:
+        raise AIError("O áudio recebido excede o tamanho permitido para um trecho.")
+    path = Path(output)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp = path.with_suffix(".part")
+    temp.write_bytes(result.content)
+    temp.replace(path)
+    return {"provider": provider_id, "model": settings["model"], "voice": settings["voice"],
+            "direction_supported": provider_id == "openai" and settings["model"] not in ("tts-1", "tts-1-hd")}
+
+
+def creation_voices(settings):
+    if settings.get("provider") == "openai":
+        return [{"id": voice, "name": voice} for voice in
+                ("alloy", "ash", "ballad", "coral", "echo", "fable", "onyx", "nova", "sage", "shimmer", "verse", "marin", "cedar")]
+    if not settings.get("key"):
+        raise ValueError("Configure a chave de voz primeiro.")
+    try:
+        response = httpx.get("https://api.elevenlabs.io/v2/voices", headers={"xi-api-key": settings["key"]}, timeout=30)
+    except httpx.HTTPError:
+        raise AIError("Não foi possível consultar as vozes.") from None
+    if response.status_code != 200:
+        raise AIError(f"A consulta de vozes respondeu HTTP {response.status_code}.")
+    return [{"id": v["voice_id"], "name": v.get("name") or v["voice_id"]} for v in response.json().get("voices", [])]
+
+
+def creation_review(settings, path, prompt):
+    """Send the actual audio/video, in bounded parts, to the configured Gemini model."""
+    import mimetypes
+    from pathlib import Path
+    if not settings.get("key") or not settings.get("model"):
+        raise ValueError("Configure a chave e um modelo Gemini com análise de áudio e vídeo na aba Criar vídeo.")
+    path = Path(path)
+    if path.stat().st_size > 18_000_000:
+        raise ValueError("Divida a mídia em partes menores antes da revisão audiovisual.")
+    mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+    if not mime.startswith(("audio/", "video/")):
+        raise ValueError("A revisão audiovisual precisa de um arquivo de áudio ou vídeo.")
+    body = {"contents": [{"role": "user", "parts": [{"text": prompt},
+            {"inline_data": {"mime_type": mime, "data": base64.b64encode(path.read_bytes()).decode()}}]}],
+            "generationConfig": {"responseMimeType": "application/json", "temperature": 0.2}}
+    from urllib.parse import quote
+    model = quote(settings["model"].removeprefix("models/"), safe="")
+    try:
+        response = httpx.post(f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+                              headers={"x-goog-api-key": settings["key"]}, json=body, timeout=240, follow_redirects=False)
+    except httpx.HTTPError:
+        raise AIError("Não foi possível conectar ao serviço de revisão audiovisual.") from None
+    if response.status_code != 200:
+        raise AIError(f"A revisão audiovisual respondeu HTTP {response.status_code}. Confira a chave e as capacidades do modelo.")
+    data = response.json()
+    text = "".join(part.get("text", "") for candidate in data.get("candidates", [])
+                   for part in candidate.get("content", {}).get("parts", []))
+    result = _parse(text)
+    if not isinstance(result, dict) or not isinstance(result.get("ok"), bool) or not isinstance(result.get("issues"), list):
+        raise AIError("A revisão audiovisual não retornou um relatório válido.")
+    used = data.get("usageMetadata") or {}
+    result["tokens_in"], result["tokens_out"] = used.get("promptTokenCount", 0), used.get("candidatesTokenCount", 0)
+    return result
+
+
 def _gem(model: str) -> str:
     """Gemini names models "models/gemini-2.5-flash"; the address already ends in /models, so only the bare id is used."""
     return model.removeprefix("models/")
 
 
-def _gemini(model, prompt, schema, timeout=None):
+def _gemini(model, prompt, schema, timeout=None, *, prompt_factory=None):
     url = f"{base_url()}/{_gem(model)}:generateContent"
     headers = {"x-goog-api-key": key()}
+    prompt = prompt_factory() if prompt_factory else prompt
     body = {"contents": [{"role": "user", "parts": [{"text": prompt}]}],
             "generationConfig": {"temperature": 0.4, "responseMimeType": "application/json", "responseSchema": schema}}
     r = httpx.post(url, json=body, headers=headers, timeout=timeout or 120)
     used_plain = False
     if r.status_code in (400, 422) and "api key" not in r.text.lower() and "api_key" not in r.text.lower():
         # Models like Gemma in the Gemini list support generateContent without responseSchema.
+        prompt = prompt_factory() if prompt_factory else prompt
         plain = {"contents": [{"role": "user", "parts": [{"text": _wrapped(prompt, schema)}]}]}
         r = httpx.post(url, json=plain, headers=headers, timeout=timeout or 120)
         used_plain = True
@@ -543,13 +639,15 @@ def _from_events(text: str) -> dict:
     return {"choices": [{"message": message}], "usage": usage}
 
 
-def _openai(model, prompt, schema, timeout=None):
+def _openai(model, prompt, schema, timeout=None, *, prompt_factory=None):
     headers = {"Authorization": f"Bearer {key()}"} if key() else {}
     body = {"model": model, "messages": [{"role": "user", "content": _wrapped(prompt, schema)}], "stream": False}
     # Most services accept these two extras; a few models refuse one of them, so they are dropped on a refusal.
     extras = [{"temperature": 0.4, "response_format": {"type": "json_object"}}, {"response_format": {"type": "json_object"}}, {}]
     r = None
     for extra in extras:
+        current_prompt = prompt_factory() if prompt_factory else prompt
+        body["messages"][0]["content"] = _wrapped(current_prompt, schema)
         r = httpx.post(f"{base_url()}/chat/completions", json={**body, **extra}, headers=headers, timeout=timeout or 180)
         if r.status_code not in (400, 422):
             break
@@ -560,7 +658,8 @@ def _openai(model, prompt, schema, timeout=None):
     return _parse(data["choices"][0]["message"].get("content")), int(u.get("prompt_tokens") or 0), int(u.get("completion_tokens") or 0)
 
 
-def _anthropic(model, prompt, schema, timeout=None):
+def _anthropic(model, prompt, schema, timeout=None, *, prompt_factory=None):
+    prompt = prompt_factory() if prompt_factory else prompt
     body = {"model": model, "max_tokens": 8192, "messages": [{"role": "user", "content": _wrapped(prompt, schema)}]}
     r = httpx.post(f"{base_url()}/messages", json=body, timeout=timeout or 180,
                    headers={"x-api-key": key(), "anthropic-version": "2023-06-01"})

@@ -14,3 +14,4 @@ uvicorn==0.54.0
 yt-dlp==2026.10.21; python_version < "3.11"
 yt-dlp[default]==2026.11.23; python_version >= "3.11"
 pillow==11.3.0
+pydantic==2.14.4

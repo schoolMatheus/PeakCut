@@ -75,6 +75,8 @@ def _startup():
         from . import fetch_model
         threading.Thread(target=lambda: _quiet(fetch_model.ensure), daemon=True).start()
     jobs.start()
+    from . import creation
+    creation.recover_all()
     live.start()
     posting.start()
     from . import updates
@@ -114,8 +116,9 @@ class Gate:
             piece = method == "PUT" and path.startswith("/api/upload/")
             # A custom motion may carry one small picture for the AI to animate.
             art = method == "POST" and path.endswith("/custom-motions/draft")
+            creation_asset = method == "POST" and path.startswith("/api/creation/projects/") and path.endswith("/assets")
             cap = ((min(config.MAX_UPLOAD_MB, config.UPLOAD_PART_MB) if piece else config.MAX_UPLOAD_MB) + 8) * 1024 * 1024 \
-                if path == "/api/upload" or piece else (min(config.MAX_UPLOAD_MB, 8) + 1) * 1024 * 1024 if art else 256 * 1024
+                if path == "/api/upload" or piece else (min(config.MAX_UPLOAD_MB, 100) + 1) * 1024 * 1024 if creation_asset else (min(config.MAX_UPLOAD_MB, 8) + 1) * 1024 * 1024 if art else 256 * 1024
             try:
                 if int(req.headers.get("content-length") or 0) > cap:
                     return await deny(413, f"That file is too big. The limit is {config.MAX_UPLOAD_MB} MB." if path == "/api/upload" else "That request is too large.")
@@ -645,9 +648,10 @@ def _job_or_404(jid: str):
 
 def _job_slots():
     from . import tools
+    from . import creation
     if tools.missing():
         raise HTTPException(503, tools.HELP)
-    if jobs.busy_count() >= config.MAX_ACTIVE_JOBS_PER_USER:
+    if jobs.busy_count() + creation.active_count() >= config.MAX_ACTIVE_JOBS_PER_USER:
         raise HTTPException(429, f"You already have {config.MAX_ACTIVE_JOBS_PER_USER} videos in progress. Wait for one to finish.")
 
 
@@ -727,7 +731,9 @@ def sync(v: str = ""):
     if v == token:
         return _sync_unchanged(v) or {"v": token}
     from . import notices
+    from . import creation_store
     return {"v": token, "jobs": [jobs.public(j) for j in jobs.list_jobs()], "creators": _creator_rows(),
+            "creation": creation_store.list_projects(),
             "accounts": accounts.list_accounts(), "ai": usage.brief(), "unread": notices.unread(),
             "clip_templates": accounts.clip_templates()}
 
@@ -2233,6 +2239,10 @@ def admin_delete_user(request: Request, uid: str, body: dict = Body(...)):
     with db.engine.begin() as c:
         admins._log(c, me_.id, "delete", target.id, "account deleted")
     return {"ok": True}
+
+
+from . import creation_routes as _creation_routes
+_creation_routes.install(app, _quota, _throttle)
 
 
 def main():

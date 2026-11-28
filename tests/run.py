@@ -53,7 +53,13 @@ def main() -> int:
         else:
             print("The test server did not start.")
             return 1
-        runs = [("permissions", ["tests/test_permissions.py", BASE, str(ROOT), sys.executable]),
+        runs = [("creation prompts, documents and workflow", ["tests/test_creation.py"]),
+                ("creation timeline contract and migration", ["tests/test_creation_timeline.py"]),
+                ("creation Remotion worker boundaries", ["tests/test_creation_remotion.py"]),
+                ("creation network and services", ["tests/test_creation_services.py"]),
+                ("creation vertical rendering", ["tests/test_creation_render.py"]),
+                ("creation accounts and API", ["tests/test_creation_api.py"]),
+                ("permissions", ["tests/test_permissions.py", BASE, str(ROOT), sys.executable]),
                 ("abuse and limits", ["tests/test_abuse.py", BASE, str(ROOT)]),
                 ("queue under load", ["tests/test_load_queue.py", str(ROOT)]),
                 ("a day-long video in little memory", ["tests/test_longvideo.py"]),

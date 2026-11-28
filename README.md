@@ -9,6 +9,11 @@ creator's live stream and clip the highlights while the stream is still running.
 
 ## What it does
 
+- **Create video.** Start from a topic, confirm the channel's niche, research at least 20 references,
+  write a documented script, synthesize narration, edit real media into a 9:16 pilot, revise it and export
+  the final video. Each operation rereads the instructions in `criacao_de_videos/` and its required project
+  documents. See [the creation guide](docs/criacao-de-videos.md) for service setup and review controls.
+
 - **Clips from any video.** Transcribes the audio, asks an AI which moments would hold a stranger's attention, and
   renders each one with captions in one of three styles.
 - **Live clipping.** Records a stream into a rolling buffer and clips as it happens, using loudness, chat activity

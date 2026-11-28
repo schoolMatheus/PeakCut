@@ -127,6 +127,9 @@ def delete_creator(cid: str) -> dict:
     c = creators.get(cid)
     if not c:
         return {"ok": False}
+    from . import creation
+    if creation.busy(cid):
+        raise Busy("Um vídeo está sendo criado para este canal. Interrompa a criação antes de excluir.")
     if live.active_for(cid):
         raise Busy("This creator is being recorded. Stop the recording first.")
     mine = [j for j in jobs.list_jobs() if j.get("creator") == cid]
@@ -151,6 +154,9 @@ def delete_account(uid: str) -> dict:
     if u.is_admin:
         raise Busy("Admin accounts can't be deleted. Make it a normal account first.")
     with ctx.as_user(uid):
+        from . import creation
+        if creation.busy():
+            raise Busy("Um vídeo está sendo criado. Interrompa a criação antes de excluir a conta.")
         for s in list(live.SESSIONS.values()):
             if s.job.get("user") == uid and not s.finished:
                 raise Busy("A stream is still being recorded. Stop the recording first.")

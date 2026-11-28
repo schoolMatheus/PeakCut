@@ -1,5 +1,6 @@
 /* Brazilian Portuguese interface copy. Keep {0}, {1}, etc. with their messages. */
 const peakcutPortuguese = {
+  "Create video": "Criar vídeo",
   "Optional": "Opcional",
   "The clip changed while the AI was writing. Ask again for the current version.": "O corte mudou enquanto a IA escrevia. Peça novamente para usar a versão atual.",
   "YouTube automatic translation": "Tradução automática do YouTube",
